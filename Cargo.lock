@@ -1455,9 +1455,57 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
-name = "rgb-core"
+name = "rgb-api"
 version = "0.11.1-alpha.3+unreviewed"
-source = "git+https://github.com/zoedberg/rgb-core?branch=0.11.1-4#dcd9d92072b8136149bc892589acb39ec3ba83db"
+dependencies = [
+ "amplify",
+ "baid64",
+ "bp-core",
+ "bp-std",
+ "bp-wallet",
+ "chrono",
+ "commit_verify",
+ "getrandom 0.3.3",
+ "indexmap 2.9.0",
+ "log",
+ "nonasync",
+ "rand 0.9.1",
+ "rgb-ops",
+ "rgb-psbt-utils",
+ "serde",
+ "serde_yaml",
+ "strict_types",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+]
+
+[[package]]
+name = "rgb-cmd"
+version = "0.11.1-alpha.3+unreviewed"
+dependencies = [
+ "amplify",
+ "baid64",
+ "bp-std",
+ "bp-wallet",
+ "clap",
+ "commit_verify",
+ "env_logger",
+ "log",
+ "rgb-api",
+ "rgb-ops",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "shellexpand",
+ "strict_types",
+ "toml",
+]
+
+[[package]]
+name = "rgb-consensus"
+version = "0.11.1-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "523a76741ed93954f5132cede3135e9601aa27fb5eeab0b896f75c4406b88d60"
 dependencies = [
  "aluvm",
  "amplify",
@@ -1476,9 +1524,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "rgb-invoice"
-version = "0.11.1-alpha.3+unreviewed"
-source = "git+https://github.com/zoedberg/rgb-std?branch=0.11.1-4#b940e6d5fbf7ed21d3f3186de61420f7aebebb2d"
+name = "rgb-invoicing"
+version = "0.11.1-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e28971552e8fda2727dc124392ba8b38b4970b569dce4584340a07b438d8ba4"
 dependencies = [
  "amplify",
  "baid64",
@@ -1489,58 +1538,17 @@ dependencies = [
  "indexmap 2.9.0",
  "percent-encoding",
  "rand 0.9.1",
- "rgb-core",
+ "rgb-consensus",
  "serde",
  "strict_encoding",
  "strict_types",
 ]
 
 [[package]]
-name = "rgb-psbt"
-version = "0.11.1-alpha.3+unreviewed"
-dependencies = [
- "amplify",
- "baid64",
- "bp-core",
- "bp-std",
- "commit_verify",
- "getrandom 0.3.3",
- "rand 0.9.1",
- "rgb-std",
- "strict_encoding",
- "wasm-bindgen",
- "wasm-bindgen-test",
-]
-
-[[package]]
-name = "rgb-runtime"
-version = "0.11.1-alpha.3+unreviewed"
-dependencies = [
- "amplify",
- "baid64",
- "bp-core",
- "bp-std",
- "bp-wallet",
- "chrono",
- "commit_verify",
- "getrandom 0.3.3",
- "indexmap 2.9.0",
- "log",
- "nonasync",
- "rand 0.9.1",
- "rgb-psbt",
- "rgb-std",
- "serde",
- "serde_yaml",
- "strict_types",
- "wasm-bindgen",
- "wasm-bindgen-test",
-]
-
-[[package]]
-name = "rgb-std"
-version = "0.11.1-alpha.3+unreviewed"
-source = "git+https://github.com/zoedberg/rgb-std?branch=0.11.1-4#b940e6d5fbf7ed21d3f3186de61420f7aebebb2d"
+name = "rgb-ops"
+version = "0.11.1-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "986bc232eb1c3b82ec94a105ba49a0a969c50f884906e8602820268238317457"
 dependencies = [
  "aluvm",
  "amplify",
@@ -1556,8 +1564,8 @@ dependencies = [
  "indexmap 2.9.0",
  "nonasync",
  "rand 0.9.1",
- "rgb-core",
- "rgb-invoice",
+ "rgb-consensus",
+ "rgb-invoicing",
  "serde",
  "strict_encoding",
  "strict_types",
@@ -1565,25 +1573,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "rgb-wallet"
+name = "rgb-psbt-utils"
 version = "0.11.1-alpha.3+unreviewed"
 dependencies = [
  "amplify",
  "baid64",
+ "bp-core",
  "bp-std",
- "bp-wallet",
- "clap",
  "commit_verify",
- "env_logger",
- "log",
- "rgb-runtime",
- "rgb-std",
- "serde",
- "serde_json",
- "serde_yaml",
- "shellexpand",
- "strict_types",
- "toml",
+ "getrandom 0.3.3",
+ "rand 0.9.1",
+ "rgb-ops",
+ "strict_encoding",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
 ]
 
 [[package]]

@@ -1,27 +1,42 @@
-## Basic concepts
-
-In order to understand the following content, you need to grasp these prerequisite concepts.
-
-### Schema
-
-The RGB protocol uses *Schemas*, akin to classes in OOP, **defines the contract business logic**, i.e. how the contract
-works. Each RGB contract is an instance of a schema created via the schema's genesis operation, separating roles for
-contract developers and issuers for easier operation.
-
-### State
-
-The **global state** applies to the entire contract (for example the name of token, is not belong to any party of the
-contract), while the **ownable state** is associated with specific single-use seals. Contracts also use special syntax
-structures like braces, brackets, and question marks to denote sets or arrays of data types involved in state operations
-and their optionality.
+# RGB Command Line Interface
 
 ## Install
 
-from source
+### Requirements
+
+First, you need to install [cargo](https://doc.rust-lang.org/cargo/).
+
+Next, you need to install developer components, which are OS-specific:
+
+* Linux
+  ```
+  sudo apt update
+  sudo apt install -y build-essential cmake pkg-config
+  ```
+
+* MacOS
+  ```
+  brew install cmake pkg-config
+  ```
+
+* Windows: download and install the
+  latest [Build Tools for Visual Studio](https://aka.ms/vs/17/release/vs_BuildTools.exe), including the 'Desktop
+  development with C++' workflow and recommended optional features
+
+
+### From crates.io
+
+To install the latest stable version run:
 
 ```
-$ git clone <https://github.com/RGB-WG/rgb>
-$ cd rgb/cli
+cargo install rgb-cmd
+```
+
+### From source
+
+```
+$ git clone https://github.com/rgb-protocol/rgb-api
+$ cd rgb-api/cli
 $ cargo install --all-features --path .
 ```
 
@@ -51,7 +66,7 @@ Currently, the only supported configuration key is `default_wallet`, and the def
 
 ## Overview
 
-Here is the command line help for rgb-cli.
+Here is the command line help:
 
 ```
 Command-line wallet for RGB smart contracts on Bitcoin
@@ -201,16 +216,16 @@ $ rgb default my_wallet
 ### Import schemata
 
 The schemata file’s name ends with `.rgba`, and the standard schemata can be found
-in [`https://github.com/RGB-WG/rgb-schemata`](https://github.com/RGB-WG/rgb-schemata) repository.
+in [`https://github.com/rgb-protocol/rgb-schemas`](https://github.com/rgb-protocol/rgb-schemas) repository.
 
 You can take a look
-at [https://github.com/RGB-WG/rgb-schemata/blob/master/schemata/NonInflatableAssets.rgba](https://github.com/RGB-WG/rgb-schemata/blob/master/schemata/NonInflatableAssets.rgba)
+at [https://github.com/rgb-protocol/rgb-schemas/blob/master/schemata/NonInflatableAsset.rgba](https://github.com/rgb-protocol/rgb-schemas/blob/master/schemata/NonInflatableAsset.rgba)
 which is the NIA schema.
 
 Example:
 
 ```shell
-$ rgb import rgb-schemata/schemata/NonInflatableAssets.rgb
+$ rgb import rgb-schemas/schemata/NonInflatableAsset.rgb
 ```
 
 ### List schemata

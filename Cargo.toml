@@ -13,9 +13,9 @@ default-members = [
 version = "0.11.1-alpha.3+unreviewed"
 keywords = ["bitcoin", "lightning", "rgb", "smart-contracts", "lnp-bp"]
 categories = ["cryptography::cryptocurrencies"]
-authors = ["Dr Maxim Orlovsky <orlovsky@lnp-bp.org>"]
-homepage = "https://rgb.tech"
-repository = "https://github.com/RGB-WG/rgb"
+authors = ["Zoe Faltibà <zoefaltiba@gmail.com>"]
+homepage = "https://rgb.info"
+repository = "https://github.com/rgb-protocol/rgb-api"
 rust-version = "1.81.0"
 edition = "2021"
 license = "Apache-2.0"
@@ -30,8 +30,8 @@ commit_verify = "0.11.1-alpha.2"
 bp-core = "0.11.1-alpha.2"
 bp-std = { version = "0.11.1-alpha.2", features = ["client-side-validation"] }
 bp-wallet = { version = "0.11.1-alpha.2" }
-rgb-std = { version = "0.11.1-alpha.3" }
-rgb-psbt = { version = "0.11.1-alpha.3", path = "psbt" }
+rgb-ops = { version = "0.11.1-rc.1" }
+rgb-psbt-utils = { version = "0.11.1-alpha.3", path = "psbt" }
 indexmap = "2.4.0"
 chrono = "0.4.38"
 serde_crate = { package = "serde", version = "1", features = ["derive"] }
@@ -39,7 +39,7 @@ serde_yaml = "0.9.19"
 log = { version = "0.4", features = ["max_level_trace", "release_max_level_debug"] }
 
 [package]
-name = "rgb-runtime"
+name = "rgb-api"
 version.workspace = true
 description = "RGB smart contracts wallet runtime"
 keywords.workspace = true
@@ -65,8 +65,8 @@ strict_types = { workspace = true }
 bp-core = { workspace = true }
 bp-std = { workspace = true }
 bp-wallet = { workspace = true }
-rgb-std = { workspace = true }
-rgb-psbt = { workspace = true }
+rgb-ops = { workspace = true }
+rgb-psbt-utils = { workspace = true }
 indexmap = { workspace = true }
 chrono = { workspace = true }
 serde_crate = { workspace = true, optional = true }
@@ -84,17 +84,13 @@ wasm-bindgen-test = "0.3"
 [features]
 default = []
 all = ["esplora_blocking", "electrum_blocking", "mempool_blocking", "serde", "log", "fs", "cli"]
-fs = ["serde", "bp-wallet/fs", "rgb-std/fs"]
+fs = ["serde", "bp-wallet/fs", "rgb-ops/fs"]
 cli = ["fs", "bp-wallet/cli", "serde_yaml"]
-esplora_blocking = ["rgb-std/esplora_blocking"]
-esplora_blocking-wasm = ["rgb-std/esplora_blocking-wasm"]
-electrum_blocking = ["rgb-std/electrum_blocking"]
-mempool_blocking = ["rgb-std/mempool_blocking"]
-serde = ["serde_crate", "bp-std/serde", "rgb-psbt/serde"]
+esplora_blocking = ["rgb-ops/esplora_blocking"]
+esplora_blocking-wasm = ["rgb-ops/esplora_blocking-wasm"]
+electrum_blocking = ["rgb-ops/electrum_blocking"]
+mempool_blocking = ["rgb-ops/mempool_blocking"]
+serde = ["serde_crate", "bp-std/serde", "rgb-psbt-utils/serde"]
 
 [package.metadata.docs.rs]
 features = ["all"]
-
-[patch.crates-io]
-rgb-core = { git = "https://github.com/zoedberg/rgb-core", branch = "0.11.1-4" }
-rgb-std = { git = "https://github.com/zoedberg/rgb-std", branch = "0.11.1-4" }
