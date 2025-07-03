@@ -30,7 +30,7 @@ commit_verify = "0.11.1-alpha.2"
 bp-core = "0.11.1-alpha.2"
 bp-std = { version = "0.11.1-alpha.2", features = ["client-side-validation"] }
 bp-wallet = { version = "0.11.1-alpha.2" }
-rgb-ops = { version = "0.11.1-rc.1" }
+rgb-ops = { version = "0.11.1-rc.2" }
 rgb-psbt-utils = { version = "0.11.1-rc.1", path = "psbt" }
 indexmap = "2.4.0"
 chrono = "0.4.38"
