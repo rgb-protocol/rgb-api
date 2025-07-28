@@ -28,7 +28,7 @@ use bp::dbc::tapret::{TapretCommitment, TapretProof};
 use bp::dbc::Proof;
 use bp::seals::txout::{CloseMethod, ExplicitSeal};
 use bp::secp256k1::rand;
-use bp::{Outpoint, Sats, ScriptPubkey, Tx, Vout};
+use bp::{Outpoint, Sats, ScriptPubkey, Vout};
 use bpstd::{psbt, Address, IdxBase, NormalIndex, Terminal};
 use bpwallet::{Layer2, Layer2Tx, NoLayer2, TxRow, Wallet, WalletDescr};
 use chrono::Utc;
@@ -41,10 +41,8 @@ use rgbstd::containers::{Batch, BuilderSeal, IndexedConsignment, Transfer};
 use rgbstd::contract::{AllocatedState, AssignmentsFilter, BuilderError};
 use rgbstd::invoice::{Amount, Beneficiary, InvoiceState, RgbInvoice};
 use rgbstd::persistence::{IndexProvider, StashInconsistency, StashProvider, StateProvider, Stock};
-use rgbstd::validation::{ConsignmentApi, DbcProof, ResolveWitness};
-use rgbstd::{
-    AssignmentType, ChainNet, ContractId, GraphSeal, Operation, Opout, OutputSeal, RevealedData,
-};
+use rgbstd::validation::{ConsignmentApi, DbcProof, WitnessOrdProvider};
+use rgbstd::{AssignmentType, ContractId, GraphSeal, Operation, Opout, OutputSeal, RevealedData};
 
 use crate::invoice::NonFungible;
 use crate::validation::WitnessResolverError;
@@ -547,19 +545,10 @@ where Self::Descr: DescriptorRgb<K>
         struct FasciaResolver {
             witness_id: Txid,
         }
-        impl ResolveWitness for FasciaResolver {
-            fn resolve_pub_witness(&self, _: Txid) -> Result<Tx, WitnessResolverError> {
-                unreachable!()
-            }
-            fn resolve_pub_witness_ord(
-                &self,
-                witness_id: Txid,
-            ) -> Result<WitnessOrd, WitnessResolverError> {
+        impl WitnessOrdProvider for FasciaResolver {
+            fn witness_ord(&self, witness_id: Txid) -> Result<WitnessOrd, WitnessResolverError> {
                 assert_eq!(witness_id, self.witness_id);
                 Ok(WitnessOrd::Tentative)
-            }
-            fn check_chain_net(&self, _: ChainNet) -> Result<(), WitnessResolverError> {
-                unreachable!()
             }
         }
 

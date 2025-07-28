@@ -36,26 +36,21 @@ pub use errors::{CompletionError, CompositionError, PayError, WalletError};
 pub use pay::{TransferParams, WalletProvider};
 pub use rgbstd::*;
 pub mod resolvers {
-    use bp::Tx;
+    pub use rgbstd::indexers::AnyResolver;
     #[cfg(any(
         feature = "electrum_blocking",
         feature = "esplora_blocking",
         feature = "mempool_blocking"
     ))]
     pub use rgbstd::indexers::*;
-    pub use rgbstd::indexers::{AnyResolver, RgbResolver};
     use rgbstd::ChainNet;
 
-    use super::validation::{ResolveWitness, WitnessResolverError};
-    use super::vm::WitnessOrd;
+    use super::validation::{ResolveWitness, WitnessResolverError, WitnessStatus};
     use super::Txid;
 
     pub struct ContractIssueResolver;
     impl ResolveWitness for ContractIssueResolver {
-        fn resolve_pub_witness(&self, _: Txid) -> Result<Tx, WitnessResolverError> {
-            panic!("contract issue resolver must not be used for an already-existing contracts")
-        }
-        fn resolve_pub_witness_ord(&self, _: Txid) -> Result<WitnessOrd, WitnessResolverError> {
+        fn resolve_witness(&self, _: Txid) -> Result<WitnessStatus, WitnessResolverError> {
             panic!("contract issue resolver must not be used for an already-existing contracts")
         }
         fn check_chain_net(&self, _: ChainNet) -> Result<(), WitnessResolverError> {
