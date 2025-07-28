@@ -420,7 +420,12 @@ impl Exec for RgbArgs {
                         let resolver = self.resolver()?;
                         eprint!("- validating the contract {} ... ", contract.contract_id());
                         let contract = contract
-                            .validate(&resolver, self.chain_net(), None)
+                            .validate(
+                                &resolver,
+                                self.chain_net(),
+                                None,
+                                stock.as_stash_provider().type_system()?.clone(),
+                            )
                             .map_err(|status| {
                                 eprintln!("failure");
                                 status.to_string()
@@ -1010,10 +1015,16 @@ impl Exec for RgbArgs {
                 eprintln!("Dump is successfully generated and saved to '{root_dir}'");
             }
             Command::Validate { file } => {
+                let stock = self.rgb_stock()?;
                 let mut resolver = self.resolver()?;
                 let consignment = Transfer::load_file(file)?;
                 resolver.add_consignment_txes(&consignment);
-                let status = match consignment.validate(&resolver, self.chain_net(), None) {
+                let status = match consignment.validate(
+                    &resolver,
+                    self.chain_net(),
+                    None,
+                    stock.as_stash_provider().type_system()?.clone(),
+                ) {
                     Ok(consignment) => consignment.into_validation_status(),
                     Err(status) => status,
                 };
@@ -1029,7 +1040,12 @@ impl Exec for RgbArgs {
                 let mut resolver = self.resolver()?;
                 let transfer = Transfer::load_file(file)?;
                 resolver.add_consignment_txes(&transfer);
-                let valid = transfer.validate(&resolver, self.chain_net(), None)?;
+                let valid = transfer.validate(
+                    &resolver,
+                    self.chain_net(),
+                    None,
+                    stock.as_stash_provider().type_system()?.clone(),
+                )?;
                 stock.accept_transfer(valid, &resolver)?;
                 eprintln!("Transfer accepted into the stash");
             }
