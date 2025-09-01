@@ -3,7 +3,7 @@
 [![Build](https://github.com/rgb-protocol/rgb-api/actions/workflows/build.yml/badge.svg)](https://github.com/rgb-protocol/rgb-api/actions/workflows/build.yml)
 [![Tests](https://github.com/rgb-protocol/rgb-api/actions/workflows/test.yml/badge.svg)](https://github.com/rgb-protocol/rgb-api/actions/workflows/test.yml)
 [![Lints](https://github.com/rgb-protocol/rgb-api/actions/workflows/lint.yml/badge.svg)](https://github.com/rgb-protocol/rgb-api/actions/workflows/lint.yml)
-[![codecov](https://codecov.io/gh/rgb-protocol/rgb/branch/master/graph/badge.svg)](https://codecov.io/gh/rgb-protocol/rgb)
+[![codecov](https://codecov.io/gh/rgb-protocol/rgb-api/branch/master/graph/badge.svg)](https://codecov.io/gh/rgb-protocol/rgb-api)
 
 [![crates.io](https://img.shields.io/crates/v/rgb-api)](https://crates.io/crates/rgb-api)
 [![Docs](https://docs.rs/rgb-api/badge.svg)](https://docs.rs/rgb-api)
