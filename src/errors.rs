@@ -33,6 +33,7 @@ use rgbstd::contract::{BuilderError, ContractError};
 use rgbstd::persistence::{
     ComposeError, ConsignError, FasciaError, Stock, StockError, StockErrorAll, StockErrorMem,
 };
+use rgbstd::validation::ValidationError;
 use rgbstd::{AssignmentType, ChainNet};
 use strict_types::encoding::Ident;
 
@@ -72,7 +73,7 @@ pub enum WalletError {
     WalletUnknown(Ident),
 
     #[from]
-    InvalidConsignment(validation::Status),
+    InvalidConsignment(ValidationError),
 
     /// invalid identifier.
     #[from]

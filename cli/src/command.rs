@@ -1019,15 +1019,13 @@ impl Exec for RgbArgs {
                 let mut resolver = self.resolver()?;
                 let consignment = Transfer::load_file(file)?;
                 resolver.add_consignment_txes(&consignment);
-                let status = match consignment.validate(
+                let validated_consignment = consignment.validate(
                     &resolver,
                     self.chain_net(),
                     None,
                     stock.as_stash_provider().type_system()?.clone(),
-                ) {
-                    Ok(consignment) => consignment.into_validation_status(),
-                    Err(status) => status,
-                };
+                )?;
+                let status = validated_consignment.validation_status();
                 if status.validity() == Validity::Valid {
                     eprintln!("The provided consignment is valid")
                 } else {
