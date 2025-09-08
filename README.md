@@ -23,7 +23,7 @@ requiring only an indexer, check [here](/cli/README.md) for details.
 
 ## License
 
-See [LICENCE](LICENSE) file.
+See [LICENSE](LICENSE) file.
 
 
 [Site]: https://rgb.info
