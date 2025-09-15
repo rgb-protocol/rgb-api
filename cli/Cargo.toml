@@ -19,15 +19,36 @@ path = "src/main.rs"
 [dependencies]
 amplify = { workspace = true }
 baid64 = { workspace = true }
-strict_types = { workspace = true, features = ["serde"] }
-commit_verify = { workspace = true }
-bp-std = { workspace = true, features = ["serde"] }
-bp-wallet = { workspace = true, features = ["cli"] }
-rgb-ops = { workspace = true, features = ["serde"] }
-rgb-api = { version = "0.11.1-rc.6", path = "..", features = ["electrum_blocking", "esplora_blocking", "mempool_blocking", "log", "serde", "fs", "cli"] }
+rgb-strict-types = { workspace = true, features = [
+    "serde",
+] }
+bp-std = { version = "0.12.0-beta.6", features = [
+    "serde",
+] }
+bp-wallet = { workspace = true, features = [
+    "cli",
+] }
+rgb-ops = { workspace = true, features = [
+    "serde",
+] }
+rgb-api = { version = "0.11.1-rc.6", path = "..", features = [
+    "cli",
+    "electrum_blocking",
+    "esplora_blocking",
+    "fs",
+    "log",
+    "mempool_blocking",
+    "serde",
+] }
+rgb-psbt-utils = { workspace = true, features = [
+    "bp",
+] }
 log = { workspace = true }
 env_logger = "0.11.5"
-clap = { version = "4.5.17", features = ["derive", "env"] }
+clap = { version = "4.5.17", features = [
+    "derive",
+    "env",
+] }
 shellexpand = "3.1.0"
 serde_crate = { workspace = true }
 serde_yaml = { workspace = true }

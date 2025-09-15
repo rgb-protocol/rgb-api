@@ -19,54 +19,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bpwallet::{Layer2, Wallet};
 use rgbstd::contract::AssignmentsFilter;
+use rgbstd::{Outpoint, Txid};
 
-use crate::{DescriptorRgb, Outpoint, Txid};
+use crate::WalletProvider;
 
-pub struct WalletOutpointsFilter<'a, K, D: DescriptorRgb<K>, L2: Layer2>(pub &'a Wallet<K, D, L2>);
-
-// We need manual derivation to ensure we can be copied and cloned even if descriptor is not
-// copyable/clonable.
-impl<K, D: DescriptorRgb<K>, L2: Layer2> Copy for WalletOutpointsFilter<'_, K, D, L2> {}
-impl<K, D: DescriptorRgb<K>, L2: Layer2> Clone for WalletOutpointsFilter<'_, K, D, L2> {
-    fn clone(&self) -> Self { *self }
+#[derive(Copy, Clone)]
+pub enum Filter {
+    Outpoints,
+    Unspent,
+    Witness,
 }
 
-impl<K, D: DescriptorRgb<K>, L2: Layer2> AssignmentsFilter for WalletOutpointsFilter<'_, K, D, L2> {
-    fn should_include(&self, outpoint: impl Into<Outpoint>, _: Option<Txid>) -> bool {
-        self.0.has_outpoint(outpoint.into())
+pub struct WalletFilter<'wallet, W: WalletProvider + ?Sized> {
+    wallet: &'wallet W,
+    filter: Filter,
+}
+
+impl<'wallet, W: WalletProvider + ?Sized> WalletFilter<'wallet, W> {
+    pub fn new(wallet: &'wallet W, filter: Filter) -> WalletFilter<'wallet, W> {
+        Self { wallet, filter }
     }
 }
 
-pub struct WalletUnspentFilter<'a, K, D: DescriptorRgb<K>, L2: Layer2>(pub &'a Wallet<K, D, L2>);
-
-// We need manual derivation to ensure we can be copied and cloned even if descriptor is not
-// copyable/clonable.
-impl<K, D: DescriptorRgb<K>, L2: Layer2> Copy for WalletUnspentFilter<'_, K, D, L2> {}
-impl<K, D: DescriptorRgb<K>, L2: Layer2> Clone for WalletUnspentFilter<'_, K, D, L2> {
+impl<W: WalletProvider + ?Sized> Copy for WalletFilter<'_, W> {}
+impl<W: WalletProvider + ?Sized> Clone for WalletFilter<'_, W> {
     fn clone(&self) -> Self { *self }
 }
 
-impl<K, D: DescriptorRgb<K>, L2: Layer2> AssignmentsFilter for WalletUnspentFilter<'_, K, D, L2> {
-    fn should_include(&self, outpoint: impl Into<Outpoint>, _: Option<Txid>) -> bool {
-        self.0.is_unspent(outpoint.into())
-    }
-}
-
-pub struct WalletWitnessFilter<'a, K, D: DescriptorRgb<K>, L2: Layer2>(pub &'a Wallet<K, D, L2>);
-
-// We need manual derivation to ensure we can be copied and cloned even if descriptor is not
-// copyable/clonable.
-impl<K, D: DescriptorRgb<K>, L2: Layer2> Copy for WalletWitnessFilter<'_, K, D, L2> {}
-impl<K, D: DescriptorRgb<K>, L2: Layer2> Clone for WalletWitnessFilter<'_, K, D, L2> {
-    fn clone(&self) -> Self { *self }
-}
-
-impl<K, D: DescriptorRgb<K>, L2: Layer2> AssignmentsFilter for WalletWitnessFilter<'_, K, D, L2> {
-    fn should_include(&self, _: impl Into<Outpoint>, witness_id: Option<Txid>) -> bool {
-        self.0
-            .history()
-            .any(|row| !row.our_inputs.is_empty() && witness_id == Some(row.txid))
+impl<W: WalletProvider + ?Sized> AssignmentsFilter for WalletFilter<'_, W> {
+    fn should_include(&self, outpoint: impl Into<Outpoint>, witness_id: Option<Txid>) -> bool {
+        match self.filter {
+            Filter::Outpoints => self.wallet.has_outpoint(outpoint.into()),
+            Filter::Unspent => self.wallet.is_unspent(outpoint.into()),
+            Filter::Witness => self.wallet.should_include_witness(witness_id),
+        }
     }
 }

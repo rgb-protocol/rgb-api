@@ -26,13 +26,12 @@ use std::io::ErrorKind;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 
-use bpstd::{Network, Wpkh, XpubDerivable};
 use bpwallet::cli::{Args as BpArgs, Config, DescriptorOpts};
-use bpwallet::Wallet;
+use bpwallet::{Network, Wallet, XpubDerivable};
 use rgb::persistence::Stock;
 use rgb::validation::ResolveWitness;
-use rgb::{ChainNet, RgbDescr, RgbWallet, TapretKey, WalletError};
-use rgbstd::indexers::AnyResolver;
+use rgb::{ChainNet, RgbDescr, RgbWallet, TapretKey, WalletError, WpkhDescr};
+use rgbstd::indexers::{esplora_blocking, AnyResolver};
 use rgbstd::persistence::fs::FsBinStore;
 use strict_types::encoding::{DecodeError, DeserializeError};
 
@@ -51,16 +50,18 @@ pub struct DescrRgbOpts {
 }
 
 impl DescriptorOpts for DescrRgbOpts {
-    type Descr = RgbDescr;
+    type Descr = RgbDescr<XpubDerivable>;
 
     fn is_some(&self) -> bool { self.tapret_key_only.is_some() || self.wpkh.is_some() }
 
     fn descriptor(&self) -> Option<Self::Descr> {
         self.tapret_key_only
             .clone()
-            .map(TapretKey::from)
-            .map(TapretKey::into)
-            .or(self.wpkh.clone().map(Wpkh::from).map(Wpkh::into))
+            .map(|xpub| RgbDescr::TapretKey(TapretKey::with_key(xpub)))
+            .or(self
+                .wpkh
+                .clone()
+                .map(|xpub| RgbDescr::Wpkh(WpkhDescr::with_key(xpub))))
     }
 }
 
@@ -160,7 +161,7 @@ impl RgbArgs {
     pub fn rgb_wallet(
         &self,
         config: &Config,
-    ) -> Result<RgbWallet<Wallet<XpubDerivable, RgbDescr>>, WalletError> {
+    ) -> Result<RgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>, WalletError> {
         let stock = self.rgb_stock()?;
         self.rgb_wallet_from_stock(config, stock)
     }
@@ -169,8 +170,8 @@ impl RgbArgs {
         &self,
         config: &Config,
         stock: Stock,
-    ) -> Result<RgbWallet<Wallet<XpubDerivable, RgbDescr>>, WalletError> {
-        let wallet = match self.inner.bp_wallet::<RgbDescr>(config) {
+    ) -> Result<RgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>, WalletError> {
+        let wallet = match self.inner.bp_wallet::<RgbDescr<XpubDerivable>>(config) {
             Ok(wallet) => wallet,
             Err(e) => return Err(e.into()),
         };
@@ -183,7 +184,9 @@ impl RgbArgs {
         let resolver =
             match (&self.resolver.esplora, &self.resolver.electrum, &self.resolver.mempool) {
                 (None, Some(url), None) => AnyResolver::electrum_blocking(url, None),
-                (Some(url), None, None) => AnyResolver::esplora_blocking(url, None),
+                (Some(url), None, None) => {
+                    AnyResolver::esplora_blocking(esplora_blocking::Builder::new(url))
+                }
                 (None, None, Some(url)) => AnyResolver::mempool_blocking(url, None),
                 _ => Err(s!(" - error: no transaction resolver is specified; use either \
                              --esplora --mempool or --electrum argument")),

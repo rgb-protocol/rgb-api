@@ -26,10 +26,13 @@ use std::str::FromStr;
 
 use amplify::confinement::{SmallOrdMap, U16 as MAX16};
 use baid64::DisplayBaid64;
-use bpstd::psbt::{Psbt, PsbtVer};
-use bpstd::{Derive, Sats, Txid, XpubDerivable};
 use bpwallet::cli::{BpCommand, Config, Exec};
-use bpwallet::Wallet;
+use bpwallet::psbt::{Output, PropKey, Psbt, PsbtConstructor, PsbtVer};
+use bpwallet::{Derive, Sats, Wallet, XpubDerivable};
+use psrgbt::bp_conversion_utils::{
+    address_payload_bitcoin_from_script_pubkey, network_bp_to_bitcoin, outpoint_bitcoin_to_bp,
+    outpoint_bp_to_bitcoin,
+};
 use rgb::containers::{
     BuilderSeal, ConsignmentExt, ContainerVer, Contract, FileContent, SecretSeals, Transfer,
     UniversalFile,
@@ -42,7 +45,7 @@ use rgb::validation::{ValidationConfig, Validity};
 use rgb::vm::{RgbIsa, WitnessOrd};
 use rgb::{
     Allocation, BundleId, ContractId, GenesisSeal, GraphSeal, Identity, OpId, Outpoint, OutputSeal,
-    OwnedFraction, RgbDescr, RgbWallet, StateType, TokenIndex, TransferParams, WalletError,
+    OwnedFraction, RgbDescr, RgbWallet, StateType, TokenIndex, TransferParams, Txid, WalletError,
     WalletProvider,
 };
 use rgbstd::contract::{AllocatedState, AssignmentsFilter, ContractData, ContractOp};
@@ -186,13 +189,13 @@ pub enum Command {
         /// Amount of satoshis which should be paid to the address-based
         /// beneficiary
         #[arg(long, default_value = "2000")]
-        sats: Sats,
+        sats: u64,
 
         /// Invoice data
         invoice: RgbInvoice,
 
         /// Fee
-        fee: Sats,
+        fee: u64,
 
         /// Name of PSBT file to save. If not given, prints PSBT to STDOUT
         psbt: Option<PathBuf>,
@@ -224,14 +227,14 @@ pub enum Command {
         /// Amount of satoshis which should be paid to the address-based
         /// beneficiary
         #[arg(long, default_value = "2000")]
-        sats: Sats,
+        sats: u64,
 
         /// Invoice data
         invoice: RgbInvoice,
 
         /// Fee for bitcoin transaction, in satoshis
         #[arg(short, long, default_value = "400")]
-        fee: Sats,
+        fee: u64,
 
         /// File for generated transfer consignment
         consignment: PathBuf,
@@ -471,7 +474,7 @@ impl Exec for RgbArgs {
 
                 enum StockOrWallet {
                     Stock(Box<Stock>),
-                    Wallet(Box<RgbWallet<Wallet<XpubDerivable, RgbDescr>>>),
+                    Wallet(Box<RgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>>),
                 }
                 impl StockOrWallet {
                     fn stock(&self) -> &Stock {
@@ -507,8 +510,8 @@ impl Exec for RgbArgs {
                 }
 
                 enum Filter<'w> {
-                    Wallet(&'w RgbWallet<Wallet<XpubDerivable, RgbDescr>>),
-                    WalletAll(&'w RgbWallet<Wallet<XpubDerivable, RgbDescr>>),
+                    Wallet(&'w RgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>),
+                    WalletAll(&'w RgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>),
                     NoWallet,
                 }
                 impl AssignmentsFilter for Filter<'_> {
@@ -528,6 +531,7 @@ impl Exec for RgbArgs {
                 }
                 impl Filter<'_> {
                     fn comment(&self, outpoint: Outpoint) -> &'static str {
+                        let outpoint = outpoint_bitcoin_to_bp(outpoint);
                         match self {
                             Filter::Wallet(rgb) if rgb.wallet().is_unspent(outpoint) => "",
                             Filter::WalletAll(rgb) if rgb.wallet().is_unspent(outpoint) => {
@@ -716,15 +720,20 @@ impl Exec for RgbArgs {
                             .next()
                             .expect("no addresses left")
                             .addr;
-                        Beneficiary::WitnessVout(Pay2Vout::new(addr.payload), None)
+                        let address_payload = address_payload_bitcoin_from_script_pubkey(
+                            &addr.payload.script_pubkey(),
+                        );
+                        Beneficiary::WitnessVout(Pay2Vout::new(address_payload), None)
                     }
                     (_, Some(outpoint)) => {
+                        let outpoint = outpoint_bp_to_bitcoin(outpoint);
                         let seal = GraphSeal::new_random(outpoint.txid, outpoint.vout);
                         wallet.stock_mut().store_secret_seal(seal)?;
                         Beneficiary::BlindedSeal(seal.to_secret_seal())
                     }
                 };
 
+                let network = network_bp_to_bitcoin(network);
                 let mut builder = RgbInvoiceBuilder::new(XChainNet::bitcoin(network, beneficiary))
                     .set_contract(*contract_id);
 
@@ -800,7 +809,7 @@ impl Exec for RgbArgs {
                 let params = TransferParams::with(*fee, *sats);
 
                 let (psbt, _) = wallet
-                    .construct_psbt(invoice, params)
+                    .construct_psbt::<PropKey, Output>(invoice, params)
                     .map_err(|err| err.to_string())?;
 
                 let ver = if *v2 { PsbtVer::V2 } else { PsbtVer::V0 };
@@ -824,7 +833,7 @@ impl Exec for RgbArgs {
                 let mut psbt_file = File::open(psbt_name)?;
                 let mut psbt = Psbt::decode(&mut psbt_file)?;
                 let transfer = wallet
-                    .transfer(invoice, &mut psbt)
+                    .transfer(invoice, &mut psbt, None)
                     .map_err(|err| err.to_string())?;
                 let mut psbt_file = File::create(psbt_name)?;
                 psbt.encode(psbt.version, &mut psbt_file)?;
@@ -842,8 +851,9 @@ impl Exec for RgbArgs {
                 // TODO: Support lock time and RBFs
                 let params = TransferParams::with(*fee, *sats);
 
-                let (mut psbt, _, transfer) =
-                    wallet.pay(invoice, params).map_err(|err| err.to_string())?;
+                let (mut psbt, _, transfer) = wallet
+                    .pay::<PropKey, Output>(invoice, params)
+                    .map_err(|err| err.to_string())?;
 
                 transfer.save_file(out_file)?;
 

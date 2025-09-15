@@ -19,19 +19,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
 #[cfg(feature = "fs")]
 use std::path::PathBuf;
 
-use bpstd::XpubDerivable;
-#[cfg(feature = "fs")]
+#[cfg(all(feature = "fs", feature = "bp"))]
 use bpwallet::fs::FsTextStore;
-#[cfg(feature = "fs")]
+#[cfg(all(feature = "fs", feature = "bp"))]
 use bpwallet::Wallet;
-use bpwallet::{Layer2, NoLayer2};
 #[cfg(all(not(target_arch = "wasm32"), feature = "fs"))]
 use nonasync::persistence::PersistenceProvider;
-use psrgbt::{Psbt, PsbtMeta};
+use psrgbt::{RgbOutExt, RgbPropKeyExt};
 use rgbstd::containers::Transfer;
 use rgbstd::contract::ContractOp;
 #[cfg(feature = "fs")]
@@ -40,35 +37,34 @@ use rgbstd::persistence::{
     IndexProvider, MemIndex, MemStash, MemState, StashProvider, StateProvider, Stock, StockError,
 };
 
-#[cfg(feature = "fs")]
+#[cfg(all(feature = "fs", feature = "bp"))]
 use super::WalletError;
 use super::{
     CompletionError, CompositionError, ContractId, DescriptorRgb, PayError, TransferParams,
     WalletProvider,
 };
 use crate::invoice::RgbInvoice;
+use crate::pay::PsbtMeta;
 
 #[derive(Getters)]
 pub struct RgbWallet<
-    W: WalletProvider<K, L2>,
-    K = XpubDerivable,
+    W: WalletProvider,
     S: StashProvider = MemStash,
     H: StateProvider = MemState,
-    P: IndexProvider = MemIndex,
-    L2: Layer2 = NoLayer2,
-> where W::Descr: DescriptorRgb<K>
-{
-    stock: Stock<S, H, P>,
+    I: IndexProvider = MemIndex,
+> {
+    stock: Stock<S, H, I>,
     wallet: W,
-    #[getter(skip)]
-    _key_phantom: PhantomData<K>,
-    #[getter(skip)]
-    _layer2_phantom: PhantomData<L2>,
 }
 
-#[cfg(feature = "fs")]
-impl<K, D: DescriptorRgb<K>, S: StashProvider, H: StateProvider, P: IndexProvider, L2: Layer2>
-    RgbWallet<Wallet<K, D, L2>, K, S, H, P, L2>
+#[cfg(all(feature = "fs", feature = "bp"))]
+impl<
+        K,
+        D: DescriptorRgb + bpwallet::Descriptor<K>,
+        S: StashProvider,
+        H: StateProvider,
+        I: IndexProvider,
+    > RgbWallet<Wallet<K, D>, S, H, I>
 {
     #[allow(clippy::result_large_err)]
     pub fn load(
@@ -78,13 +74,9 @@ impl<K, D: DescriptorRgb<K>, S: StashProvider, H: StateProvider, P: IndexProvide
     ) -> Result<Self, WalletError>
     where
         D: serde::Serialize + for<'de> serde::Deserialize<'de>,
-        L2::Descr: serde::Serialize + for<'de> serde::Deserialize<'de>,
-        L2::Data: serde::Serialize + for<'de> serde::Deserialize<'de>,
-        L2::Cache: serde::Serialize + for<'de> serde::Deserialize<'de>,
         FsBinStore: PersistenceProvider<S>,
         FsBinStore: PersistenceProvider<H>,
-        FsBinStore: PersistenceProvider<P>,
-        FsTextStore: PersistenceProvider<L2>,
+        FsBinStore: PersistenceProvider<I>,
     {
         use nonasync::persistence::PersistenceError;
         let provider = FsBinStore::new(stock_path)
@@ -93,68 +85,53 @@ impl<K, D: DescriptorRgb<K>, S: StashProvider, H: StateProvider, P: IndexProvide
         let provider = FsTextStore::new(wallet_path)
             .map_err(|e| WalletError::WalletPersist(PersistenceError::with(e)))?;
         let wallet = Wallet::load(provider, autosave).map_err(WalletError::WalletPersist)?;
-        Ok(Self {
-            wallet,
-            stock,
-            _key_phantom: PhantomData,
-            _layer2_phantom: PhantomData,
-        })
+        Ok(Self { wallet, stock })
     }
 }
 
-impl<
-        K,
-        W: WalletProvider<K, L2>,
-        S: StashProvider,
-        H: StateProvider,
-        P: IndexProvider,
-        L2: Layer2,
-    > RgbWallet<W, K, S, H, P, L2>
-where W::Descr: DescriptorRgb<K>
+impl<W: WalletProvider, S: StashProvider, H: StateProvider, I: IndexProvider>
+    RgbWallet<W, S, H, I>
 {
-    pub fn new(stock: Stock<S, H, P>, wallet: W) -> Self {
-        Self {
-            stock,
-            wallet,
-            _key_phantom: PhantomData,
-            _layer2_phantom: PhantomData,
-        }
-    }
+    pub fn new(stock: Stock<S, H, I>, wallet: W) -> Self { Self { stock, wallet } }
 
-    pub fn stock_mut(&mut self) -> &mut Stock<S, H, P> { &mut self.stock }
+    pub fn stock_mut(&mut self) -> &mut Stock<S, H, I> { &mut self.stock }
 
     pub fn wallet_mut(&mut self) -> &mut W { &mut self.wallet }
 
-    pub fn history(&self, contract_id: ContractId) -> Result<Vec<ContractOp>, StockError<S, H, P>> {
+    pub fn history(&self, contract_id: ContractId) -> Result<Vec<ContractOp>, StockError<S, H, I>> {
         let contract = self.stock.contract_data(contract_id)?;
         let wallet = &self.wallet;
         Ok(contract.history(wallet.filter_outpoints(), wallet.filter_witnesses()))
     }
 
     #[allow(clippy::result_large_err)]
-    pub fn pay(
+    pub fn pay<P: RgbPropKeyExt, O: RgbOutExt<P>>(
         &mut self,
         invoice: &RgbInvoice,
         params: TransferParams,
-    ) -> Result<(Psbt, PsbtMeta, Transfer), PayError> {
-        self.wallet.pay(&mut self.stock, invoice, params)
+    ) -> Result<(W::Psbt, PsbtMeta, Transfer), PayError> {
+        self.wallet
+            .pay::<S, H, I, P, O>(&mut self.stock, invoice, params)
     }
 
     #[allow(clippy::result_large_err)]
-    pub fn construct_psbt(
+    pub fn construct_psbt<P: RgbPropKeyExt, O: RgbOutExt<P>>(
         &mut self,
         invoice: &RgbInvoice,
         params: TransferParams,
-    ) -> Result<(Psbt, PsbtMeta), CompositionError> {
-        self.wallet.construct_psbt_rgb(&self.stock, invoice, params)
+    ) -> Result<(W::Psbt, PsbtMeta), CompositionError> {
+        self.wallet
+            .construct_psbt_rgb::<S, H, I, P, O>(&self.stock, invoice, params)
     }
 
     #[allow(clippy::result_large_err)]
     pub fn transfer(
         &mut self,
         invoice: &RgbInvoice,
-        psbt: &mut Psbt,
+        psbt: &mut W::Psbt,
+        beneficiary_vout: Option<u32>,
     ) -> Result<Transfer, CompletionError> {
-        self.wallet.transfer(&mut self.stock, invoice, psbt)
+        self.wallet
+            .transfer(&mut self.stock, invoice, psbt, beneficiary_vout)
     }
 }

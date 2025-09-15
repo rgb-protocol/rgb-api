@@ -25,9 +25,10 @@ use std::convert::Infallible;
 use std::io;
 
 use amplify::IoError;
-use bpstd::Psbt;
+#[cfg(feature = "bp")]
+use bpwallet::psbt::{ConstructionError, DecodeError};
 use nonasync::persistence::PersistenceError;
-use psrgbt::{CommitError, ConstructionError, EmbedError, TapretKeyError};
+use psrgbt::{CommitError, EmbedError, TapretKeyError};
 use rgbstd::containers::LoadError;
 use rgbstd::contract::{BuilderError, ContractError};
 use rgbstd::persistence::{
@@ -65,8 +66,9 @@ pub enum WalletError {
 
     Invoicing(String),
 
+    #[cfg(feature = "bp")]
     #[from]
-    PsbtDecode(psrgbt::DecodeError),
+    PsbtDecode(DecodeError),
 
     /// wallet with id '{0}' is not known to the system.
     #[display(doc_comments)]
@@ -122,7 +124,7 @@ pub enum PayError {
     Composition(CompositionError),
 
     #[display("{0}")]
-    Completion(CompletionError, Psbt),
+    Completion(CompletionError),
 }
 
 #[derive(Debug, Display, Error, From)]
@@ -157,6 +159,7 @@ pub enum CompositionError {
     /// non-fungible state is not yet supported by the invoices.
     Unsupported,
 
+    #[cfg(feature = "bp")]
     #[from]
     #[display(inner)]
     Construction(ConstructionError),
@@ -194,6 +197,13 @@ pub enum CompositionError {
     #[from(StockErrorMem<ComposeError>)]
     #[display(inner)]
     Stock(String),
+
+    /// unsupported close method: {0}
+    #[display(doc_comments)]
+    UnsupportedCloseMethod(String),
+
+    /// unexpected error: {0}
+    Unexpected(String),
 }
 
 #[derive(Debug, Display, Error, From)]

@@ -25,13 +25,19 @@ extern crate amplify;
 #[macro_use]
 extern crate serde_crate as serde;
 
+#[cfg(feature = "bdk")]
+mod bdk_provider;
+#[cfg(feature = "bp")]
+mod bp_provider;
 mod descriptor;
 mod filters;
 pub mod pay;
 mod errors;
 mod wallet;
 
-pub use descriptor::{DescriptorRgb, RgbDescr, TapretKey};
+#[cfg(feature = "bp")]
+pub use descriptor::bp_wallet_integration;
+pub use descriptor::{DescriptorRgb, RgbDescr, TapretKey, WpkhDescr};
 pub use errors::{CompletionError, CompositionError, PayError, WalletError};
 pub use pay::{TransferParams, WalletProvider};
 pub use rgbstd::*;
@@ -58,5 +64,5 @@ pub mod resolvers {
         }
     }
 }
-pub use filters::{WalletOutpointsFilter, WalletUnspentFilter, WalletWitnessFilter};
+pub use filters::WalletFilter;
 pub use wallet::RgbWallet;
