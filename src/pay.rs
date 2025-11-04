@@ -37,11 +37,11 @@ use psrgbt::{
     Beneficiary as BpBeneficiary, Psbt, PsbtConstructor, PsbtMeta, RgbExt, RgbPsbt, TapretKeyError,
     TxParams,
 };
-use rgbstd::containers::{Batch, BuilderSeal, IndexedConsignment, Transfer};
+use rgbstd::containers::{Batch, BuilderSeal, Transfer};
 use rgbstd::contract::{AllocatedState, AssignmentsFilter, BuilderError};
 use rgbstd::invoice::{Amount, Beneficiary, InvoiceState, RgbInvoice};
 use rgbstd::persistence::{IndexProvider, StashInconsistency, StashProvider, StateProvider, Stock};
-use rgbstd::validation::{ConsignmentApi, DbcProof, WitnessOrdProvider};
+use rgbstd::validation::{DbcProof, WitnessOrdProvider};
 use rgbstd::{AssignmentType, ContractId, GraphSeal, Operation, Opout, OutputSeal, RevealedData};
 
 use crate::invoice::NonFungible;
@@ -593,7 +593,6 @@ impl<K, D: DescriptorRgb<K>, L2: Layer2> WalletProvider<K, L2> for Wallet<K, D, 
     }
 
     fn try_add_tapret_tweak(&mut self, transfer: Transfer, txid: &Txid) -> Result<(), WalletError> {
-        let indexed_consignment = IndexedConsignment::new(&transfer);
         let contract_id = transfer.genesis.contract_id();
         let close_method = self.descriptor().close_method();
         let keychain = RgbKeychain::for_method(close_method);
@@ -605,9 +604,9 @@ impl<K, D: DescriptorRgb<K>, L2: Layer2> WalletProvider<K, L2> for Wallet<K, D, 
             .find(|bw| bw.witness_id() == *txid)
             .and_then(|bw| {
                 let bundle_id = bw.bundle().bundle_id();
-                let (_, anchor) = indexed_consignment.anchor(bundle_id).unwrap();
-                if let DbcProof::Tapret(tapret) = anchor.dbc_proof.clone() {
-                    let commitment = anchor
+                if let DbcProof::Tapret(tapret) = bw.anchor.dbc_proof.clone() {
+                    let commitment = bw
+                        .anchor
                         .mpc_proof
                         .clone()
                         .convolve(ProtocolId::from(contract_id), Message::from(bundle_id))
