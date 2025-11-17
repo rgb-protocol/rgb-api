@@ -123,7 +123,11 @@ where Self::Descr: DescriptorRgb<K>
         terminal: Terminal,
         tapret_commitment: TapretCommitment,
     ) -> Result<(), Infallible>;
-    fn try_add_tapret_tweak(&mut self, transfer: Transfer, txid: &Txid) -> Result<(), WalletError>;
+    fn try_add_tapret_tweak(
+        &mut self,
+        transfer: Transfer,
+        txid: &Txid,
+    ) -> Result<(), Box<WalletError>>;
 
     #[allow(clippy::result_large_err)]
     fn pay<S: StashProvider, H: StateProvider, P: IndexProvider>(
@@ -592,7 +596,11 @@ impl<K, D: DescriptorRgb<K>, L2: Layer2> WalletProvider<K, L2> for Wallet<K, D, 
         })
     }
 
-    fn try_add_tapret_tweak(&mut self, transfer: Transfer, txid: &Txid) -> Result<(), WalletError> {
+    fn try_add_tapret_tweak(
+        &mut self,
+        transfer: Transfer,
+        txid: &Txid,
+    ) -> Result<(), Box<WalletError>> {
         let contract_id = transfer.genesis.contract_id();
         let close_method = self.descriptor().close_method();
         let keychain = RgbKeychain::for_method(close_method);
@@ -630,6 +638,6 @@ impl<K, D: DescriptorRgb<K>, L2: Layer2> WalletProvider<K, L2> for Wallet<K, D, 
                 .unwrap();
             return Ok(());
         }
-        Err(WalletError::NoTweakTerminal)
+        Err(Box::new(WalletError::NoTweakTerminal))
     }
 }

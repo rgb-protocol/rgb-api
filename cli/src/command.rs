@@ -38,7 +38,7 @@ use rgb::invoice::{Beneficiary, Pay2Vout, RgbInvoice, RgbInvoiceBuilder, XChainN
 use rgb::persistence::{MemContract, StashReadProvider, Stock};
 use rgb::resolvers::ContractIssueResolver;
 use rgb::schema::SchemaId;
-use rgb::validation::Validity;
+use rgb::validation::{ValidationConfig, Validity};
 use rgb::vm::{RgbIsa, WitnessOrd};
 use rgb::{
     Allocation, BundleId, ContractId, GenesisSeal, GraphSeal, Identity, OpId, Outpoint, OutputSeal,
@@ -410,7 +410,7 @@ impl Exec for RgbArgs {
                             eprintln!("- script library {}", lib.id());
                         }
                         eprintln!("- strict types: {} definitions", kit.types.len());
-                        let kit = kit.validate().map_err(|status| status.to_string())?;
+                        let kit = kit.validate().map_err(|err| format!("{err:?}"))?;
                         stock.import_kit(kit)?;
                         eprintln!("Kit is imported");
                     }
@@ -419,17 +419,18 @@ impl Exec for RgbArgs {
                         eprintln!("Importing consignment {id}:");
                         let resolver = self.resolver()?;
                         eprint!("- validating the contract {} ... ", contract.contract_id());
-                        let contract = contract
-                            .validate(
-                                &resolver,
-                                self.chain_net(),
-                                None,
-                                stock.as_stash_provider().type_system()?.clone(),
-                            )
-                            .map_err(|status| {
-                                eprintln!("failure");
-                                status.to_string()
-                            })?;
+                        let validation_config = ValidationConfig {
+                            chain_net: self.chain_net(),
+                            trusted_typesystem: stock.as_stash_provider().type_system()?.clone(),
+                            ..Default::default()
+                        };
+                        let contract =
+                            contract
+                                .validate(&resolver, &validation_config)
+                                .map_err(|status| {
+                                    eprintln!("failure");
+                                    status.to_string()
+                                })?;
                         eprintln!("success");
                         stock.import_contract(contract, &resolver)?;
                         eprintln!("Consignment is imported");
@@ -1019,12 +1020,12 @@ impl Exec for RgbArgs {
                 let mut resolver = self.resolver()?;
                 let consignment = Transfer::load_file(file)?;
                 resolver.add_consignment_txes(&consignment);
-                let validated_consignment = consignment.validate(
-                    &resolver,
-                    self.chain_net(),
-                    None,
-                    stock.as_stash_provider().type_system()?.clone(),
-                )?;
+                let validation_config = ValidationConfig {
+                    chain_net: self.chain_net(),
+                    trusted_typesystem: stock.as_stash_provider().type_system()?.clone(),
+                    ..Default::default()
+                };
+                let validated_consignment = consignment.validate(&resolver, &validation_config)?;
                 let status = validated_consignment.validation_status();
                 if status.validity() == Validity::Valid {
                     eprintln!("The provided consignment is valid")
@@ -1038,12 +1039,12 @@ impl Exec for RgbArgs {
                 let mut resolver = self.resolver()?;
                 let transfer = Transfer::load_file(file)?;
                 resolver.add_consignment_txes(&transfer);
-                let valid = transfer.validate(
-                    &resolver,
-                    self.chain_net(),
-                    None,
-                    stock.as_stash_provider().type_system()?.clone(),
-                )?;
+                let validation_config = ValidationConfig {
+                    chain_net: self.chain_net(),
+                    trusted_typesystem: stock.as_stash_provider().type_system()?.clone(),
+                    ..Default::default()
+                };
+                let valid = transfer.validate(&resolver, &validation_config)?;
                 stock.accept_transfer(valid, &resolver)?;
                 eprintln!("Transfer accepted into the stash");
             }
