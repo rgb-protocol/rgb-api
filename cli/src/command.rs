@@ -27,7 +27,7 @@ use std::str::FromStr;
 use amplify::confinement::{SmallOrdMap, U16 as MAX16};
 use baid64::DisplayBaid64;
 use bpstd::psbt::{Psbt, PsbtVer};
-use bpstd::{Sats, Txid, XpubDerivable};
+use bpstd::{Derive, Sats, Txid, XpubDerivable};
 use bpwallet::cli::{BpCommand, Config, Exec};
 use bpwallet::Wallet;
 use rgb::containers::{
@@ -42,8 +42,8 @@ use rgb::validation::{ValidationConfig, Validity};
 use rgb::vm::{RgbIsa, WitnessOrd};
 use rgb::{
     Allocation, BundleId, ContractId, GenesisSeal, GraphSeal, Identity, OpId, Outpoint, OutputSeal,
-    OwnedFraction, RgbDescr, RgbKeychain, RgbWallet, StateType, TokenIndex, TransferParams,
-    WalletError, WalletProvider,
+    OwnedFraction, RgbDescr, RgbWallet, StateType, TokenIndex, TransferParams, WalletError,
+    WalletProvider,
 };
 use rgbstd::contract::{AllocatedState, AssignmentsFilter, ContractData, ContractOp};
 use rgbstd::persistence::MemContractState;
@@ -701,12 +701,7 @@ impl Exec for RgbArgs {
             } => {
                 let mut wallet = self.rgb_wallet(&config)?;
 
-                let outpoint = wallet
-                    .wallet()
-                    .coinselect(Sats::ZERO, |utxo| {
-                        RgbKeychain::contains_rgb(utxo.terminal.keychain)
-                    })
-                    .next();
+                let outpoint = wallet.wallet().coinselect(Sats::ZERO, |_| true).next();
                 let network = wallet.wallet().network();
                 let beneficiary = match (address_based, outpoint) {
                     (false, None) => {
@@ -717,7 +712,7 @@ impl Exec for RgbArgs {
                     (true, _) => {
                         let addr = wallet
                             .wallet()
-                            .addresses(RgbKeychain::Rgb)
+                            .addresses(wallet.wallet().default_keychain())
                             .next()
                             .expect("no addresses left")
                             .addr;

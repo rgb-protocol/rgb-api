@@ -22,18 +22,14 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{self, Display, Formatter};
 use std::iter;
-use std::str::FromStr;
 
-use amplify::Wrapper;
 use bp::dbc::tapret::TapretCommitment;
-use bp::dbc::Method;
 use bp::seals::txout::CloseMethod;
 use bp::{LegacyPk, SigScript, Witness};
 use bpstd::{
-    Derive, DeriveCompr, DeriveSet, DeriveXOnly, DerivedScript, Descriptor, Idx, IdxBase,
-    IndexError, IndexParseError, KeyOrigin, Keychain, LegacyKeySig, NormalIndex, SpkClass,
-    StdDescr, TapDerivation, TapScript, TapTree, TaprootKeySig, Terminal, TrKey, Wpkh, XOnlyPk,
-    XpubAccount, XpubDerivable,
+    Derive, DeriveCompr, DeriveSet, DeriveXOnly, DerivedScript, Descriptor, KeyOrigin, Keychain,
+    LegacyKeySig, NormalIndex, SpkClass, StdDescr, TapDerivation, TapScript, TapTree,
+    TaprootKeySig, Terminal, TrKey, Wpkh, XOnlyPk, XpubAccount, XpubDerivable,
 };
 use commit_verify::CommitVerify;
 use indexmap::IndexMap;
@@ -41,66 +37,6 @@ use indexmap::IndexMap;
 pub trait DescriptorRgb<K = XpubDerivable, V = ()>: Descriptor<K, V> {
     fn close_method(&self) -> CloseMethod;
     fn add_tapret_tweak(&mut self, terminal: Terminal, tweak: TapretCommitment);
-}
-
-#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display)]
-#[cfg_attr(
-    feature = "serde",
-    derive(Serialize, Deserialize),
-    serde(crate = "serde_crate", rename_all = "camelCase")
-)]
-#[repr(u8)]
-pub enum RgbKeychain {
-    #[display("0", alt = "0")]
-    External = 0,
-
-    #[display("1", alt = "1")]
-    Internal = 1,
-
-    #[display("9", alt = "9")]
-    Rgb = 9,
-
-    #[display("10", alt = "10")]
-    Tapret = 10,
-}
-
-impl RgbKeychain {
-    pub const RGB_ALL: [RgbKeychain; 2] = [RgbKeychain::Rgb, RgbKeychain::Tapret];
-
-    pub fn contains_rgb(keychain: impl Into<Keychain>) -> bool {
-        let k = keychain.into().into_inner();
-        k == Self::Rgb as u8 || k == Self::Tapret as u8
-    }
-    pub fn is_seal(self) -> bool { self == Self::Rgb || self == Self::Tapret }
-
-    pub const fn for_method(method: Method) -> Self {
-        match method {
-            Method::OpretFirst => Self::Rgb,
-            Method::TapretFirst => Self::Tapret,
-        }
-    }
-}
-
-impl FromStr for RgbKeychain {
-    type Err = IndexParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match NormalIndex::from_str(s)? {
-            NormalIndex::ZERO => Ok(RgbKeychain::External),
-            NormalIndex::ONE => Ok(RgbKeychain::Internal),
-            val => Err(IndexError {
-                what: "non-standard keychain",
-                invalid: val.index(),
-                start: 0,
-                end: 1,
-            }
-            .into()),
-        }
-    }
-}
-
-impl From<RgbKeychain> for Keychain {
-    fn from(keychain: RgbKeychain) -> Self { Keychain::from(keychain as u8) }
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
@@ -119,9 +55,7 @@ impl<K: DeriveXOnly + Display> Display for TapretKey<K> {
         write!(f, "tapret({},tweaks(", self.tr.as_internal_key())?;
         let mut iter = self.tweaks.iter().peekable();
         while let Some((term, tweaks)) = iter.next() {
-            if term.keychain != RgbKeychain::Tapret.into() {
-                write!(f, "{}/{}=", term.keychain, term.index)?;
-            }
+            write!(f, "{}/{}=", term.keychain, term.index)?;
             let mut commitment_iter = tweaks.iter().peekable();
             while let Some(tweak) = commitment_iter.next() {
                 write!(f, "{tweak}")?;
@@ -148,7 +82,7 @@ impl<K: DeriveXOnly> TapretKey<K> {
 
 impl<K: DeriveXOnly> Derive<DerivedScript> for TapretKey<K> {
     #[inline]
-    fn default_keychain(&self) -> Keychain { RgbKeychain::Rgb.into() }
+    fn default_keychain(&self) -> Keychain { self.tr.default_keychain() }
 
     fn keychains(&self) -> BTreeSet<Keychain> { self.tr.keychains() }
 

@@ -48,7 +48,7 @@ use crate::invoice::NonFungible;
 use crate::validation::WitnessResolverError;
 use crate::vm::WitnessOrd;
 use crate::{
-    CompletionError, CompositionError, DescriptorRgb, PayError, RgbKeychain, Txid, WalletError,
+    CompletionError, CompositionError, DescriptorRgb, PayError, Txid, WalletError,
     WalletOutpointsFilter, WalletUnspentFilter, WalletWitnessFilter,
 };
 
@@ -150,7 +150,7 @@ where Self::Descr: DescriptorRgb<K>
         &mut self,
         stock: &Stock<S, H, P>,
         invoice: &RgbInvoice,
-        mut params: TransferParams,
+        params: TransferParams,
     ) -> Result<(Psbt, PsbtMeta), CompositionError> {
         let close_method = self.descriptor().close_method();
 
@@ -270,7 +270,6 @@ where Self::Descr: DescriptorRgb<K>
             return Err(CompositionError::InsufficientState);
         }
         let prev_outpoints = prev_outputs.iter().map(|o| Outpoint::new(o.txid, o.vout));
-        params.tx.change_keychain = RgbKeychain::for_method(close_method).into();
 
         let (beneficiaries, beneficiary_script) = match invoice.beneficiary.into_inner() {
             Beneficiary::BlindedSeal(_) => (vec![], None),
@@ -602,41 +601,41 @@ impl<K, D: DescriptorRgb<K>, L2: Layer2> WalletProvider<K, L2> for Wallet<K, D, 
         txid: &Txid,
     ) -> Result<(), Box<WalletError>> {
         let contract_id = transfer.genesis.contract_id();
-        let close_method = self.descriptor().close_method();
-        let keychain = RgbKeychain::for_method(close_method);
-        let last_index = self.next_derivation_index(keychain, false).index() as u16;
-        let descr = self.descriptor();
-        if let Some((idx, tweak)) = transfer
-            .bundles
-            .iter()
-            .find(|bw| bw.witness_id() == *txid)
-            .and_then(|bw| {
-                let bundle_id = bw.bundle().bundle_id();
-                if let DbcProof::Tapret(tapret) = bw.anchor.dbc_proof.clone() {
-                    let commitment = bw
-                        .anchor
-                        .mpc_proof
-                        .clone()
-                        .convolve(ProtocolId::from(contract_id), Message::from(bundle_id))
-                        .unwrap();
-                    let tweak = TapretCommitment::with(commitment, tapret.path_proof.nonce());
-                    (0..last_index)
-                        .rev()
-                        .map(NormalIndex::normal)
-                        .find(|i| {
-                            descr
-                                .derive(keychain, i)
-                                .any(|ds| ds.to_internal_pk() == Some(tapret.internal_pk))
-                        })
-                        .map(|idx| (idx, tweak))
-                } else {
-                    None
-                }
-            })
-        {
-            self.add_tapret_tweak(Terminal::new(keychain, idx), tweak)
-                .unwrap();
-            return Ok(());
+        for keychain in self.keychains() {
+            let last_index = self.next_derivation_index(keychain, false).index() as u16;
+            let descr = self.descriptor();
+            if let Some((idx, tweak)) = transfer
+                .bundles
+                .iter()
+                .find(|bw| bw.witness_id() == *txid)
+                .and_then(|bw| {
+                    let bundle_id = bw.bundle().bundle_id();
+                    if let DbcProof::Tapret(tapret) = bw.anchor.dbc_proof.clone() {
+                        let commitment = bw
+                            .anchor
+                            .mpc_proof
+                            .clone()
+                            .convolve(ProtocolId::from(contract_id), Message::from(bundle_id))
+                            .unwrap();
+                        let tweak = TapretCommitment::with(commitment, tapret.path_proof.nonce());
+                        (0..last_index)
+                            .rev()
+                            .map(NormalIndex::normal)
+                            .find(|i| {
+                                descr
+                                    .derive(keychain, i)
+                                    .any(|ds| ds.to_internal_pk() == Some(tapret.internal_pk))
+                            })
+                            .map(|idx| (idx, tweak))
+                    } else {
+                        None
+                    }
+                })
+            {
+                self.add_tapret_tweak(Terminal::new(keychain, idx), tweak)
+                    .unwrap();
+                return Ok(());
+            }
         }
         Err(Box::new(WalletError::NoTweakTerminal))
     }
