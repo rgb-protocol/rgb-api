@@ -171,10 +171,7 @@ impl RgbArgs {
         config: &Config,
         stock: Stock,
     ) -> Result<RgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>, WalletError> {
-        let wallet = match self.inner.bp_wallet::<RgbDescr<XpubDerivable>>(config) {
-            Ok(wallet) => wallet,
-            Err(e) => return Err(e.into()),
-        };
+        let wallet = self.inner.bp_wallet::<RgbDescr<XpubDerivable>>(config)?;
         let wallet = RgbWallet::new(stock, wallet);
 
         Ok(wallet)
