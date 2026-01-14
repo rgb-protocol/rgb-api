@@ -184,9 +184,9 @@ impl RgbArgs {
         let resolver =
             match (&self.resolver.esplora, &self.resolver.electrum, &self.resolver.mempool) {
                 (None, Some(url), None) => AnyResolver::electrum_blocking(url, None),
-                (Some(url), None, None) => {
-                    AnyResolver::esplora_blocking(esplora_blocking::Builder::new(url))
-                }
+                (Some(url), None, None) => AnyResolver::esplora_blocking(
+                    esplora_blocking::esplora_client::Builder::new(url),
+                ),
                 (None, None, Some(url)) => AnyResolver::mempool_blocking(url, None),
                 _ => Err(s!(" - error: no transaction resolver is specified; use either \
                              --esplora --mempool or --electrum argument")),
