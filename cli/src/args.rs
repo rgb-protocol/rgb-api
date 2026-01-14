@@ -110,7 +110,7 @@ impl RgbArgs {
             if err
                 .0
                 .downcast_ref::<DeserializeError>()
-                .map(|e| matches!(e, DeserializeError::Decode(DecodeError::Io(ref e)) if e.kind() == ErrorKind::NotFound))
+                .map(|e| matches!(e, DeserializeError::Decode(DecodeError::Io(e)) if e.kind() == ErrorKind::NotFound))
                 .unwrap_or_default()
             {
                 if self.verbose > 1 {
