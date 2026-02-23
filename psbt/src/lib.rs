@@ -896,10 +896,7 @@ pub trait RgbPsbtExt<P: RgbPropKeyExt, O: RgbOutExt<P>> {
         };
         let witness = PubWitness::with(self.unsigned_tx());
         let seal_witness = SealWitness::new(witness, merkle_block, dbc_proof);
-        Ok(Fascia {
-            seal_witness,
-            bundles,
-        })
+        Ok(Fascia::new(seal_witness, bundles))
     }
 
     fn proprietary_rgb_contract_consumer_keys<'a>(&'a self) -> impl Iterator<Item = &'a [u8]> + 'a;

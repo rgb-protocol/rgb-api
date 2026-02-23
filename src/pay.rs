@@ -568,7 +568,7 @@ pub trait WalletProvider {
         let contract_id = invoice.contract.ok_or(CompletionError::NoContract)?;
 
         let fascia = psbt.rgb_commit()?;
-        if matches!(fascia.seal_witness.dbc_proof.method(), CloseMethod::TapretFirst) {
+        if matches!(fascia.seal_witness().dbc_proof.method(), CloseMethod::TapretFirst) {
             // save tweak only if tapret commitment is on the bitcoin change
             if psbt.rgb_tapret_host_on_change() {
                 let output = psbt
