@@ -5,12 +5,10 @@ on:
     branches:
       - master
     tags:
-      - 'v[0-9]+\.*'
+      - '*'
   pull_request:
     branches:
       - master
-      - develop
-      - 'v[0-9]+.[0-9]+'
 
 env:
   CARGO_TERM_COLOR: always
@@ -25,14 +23,16 @@ jobs:
     steps:
       - uses: ilammy/setup-nasm@v1
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Test ${{matrix.os}}
         run: cargo test --workspace --all-features --no-fail-fast
   wasm-testing:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly
       - uses: jetli/wasm-pack-action@v0.4.0
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown
