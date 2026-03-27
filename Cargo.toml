@@ -29,7 +29,7 @@ baid64 = "=0.4.1"
 rgb-strict-encoding = "1.0.1"
 rgb-strict-types = "1.0.1"
 bp-wallet = { version = "0.11.1-alpha.2" }
-rgb-ops = { version = "0.11.1-rc.8" }
+rgb-ops = { version = "0.11.1-rc.9" }
 rgb-psbt-utils = { version = "0.11.1-rc.8", path = "psbt" }
 indexmap = "2.4.0"
 chrono = "0.4.38"
