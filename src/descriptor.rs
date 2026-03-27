@@ -22,9 +22,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display, Formatter};
 
-use amplify::Wrapper;
-#[cfg(feature = "bp")]
-use bpwallet::IdxBase;
 use psrgbt::Terminal;
 use rgbstd::bitcoin::key::UntweakedPublicKey;
 use rgbstd::bitcoin::PublicKey;
@@ -151,8 +148,9 @@ pub mod bp_wallet_integration {
     use std::collections::{BTreeSet, HashMap};
     use std::iter;
 
+    use amplify::Wrapper;
     use bpwallet::{
-        Derive, DeriveXOnly, DerivedScript, Descriptor, KeyOrigin, Keychain, LegacyKeySig,
+        Derive, DeriveXOnly, DerivedScript, Descriptor, IdxBase, KeyOrigin, Keychain, LegacyKeySig,
         LegacyPk, NormalIndex, SigScript, SpkClass, TapDerivation, TapScript, TapTree,
         TaprootKeySig, TrKey, Witness, Wpkh, XOnlyPk, XpubAccount, XpubDerivable,
     };

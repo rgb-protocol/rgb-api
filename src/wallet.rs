@@ -37,12 +37,11 @@ use rgbstd::persistence::{
     IndexProvider, MemIndex, MemStash, MemState, StashProvider, StateProvider, Stock, StockError,
 };
 
-#[cfg(all(feature = "fs", feature = "bp"))]
-use super::WalletError;
 use super::{
-    CompletionError, CompositionError, ContractId, DescriptorRgb, PayError, TransferParams,
-    WalletProvider,
+    CompletionError, CompositionError, ContractId, PayError, TransferParams, WalletProvider,
 };
+#[cfg(all(feature = "fs", feature = "bp"))]
+use super::{DescriptorRgb, WalletError};
 use crate::invoice::RgbInvoice;
 use crate::pay::PsbtMeta;
 
