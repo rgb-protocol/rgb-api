@@ -22,18 +22,15 @@
 #![allow(clippy::needless_update, clippy::result_large_err)] // Required by From derive macro
 
 use std::fs;
-use std::io::ErrorKind;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 
 use bpwallet::cli::{Args as BpArgs, Config, DescriptorOpts};
 use bpwallet::{Network, Wallet, XpubDerivable};
-use rgb::persistence::Stock;
 use rgb::validation::ResolveWitness;
-use rgb::{ChainNet, RgbDescr, RgbWallet, TapretKey, WalletError, WpkhDescr};
+use rgb::{ChainNet, RgbDescr, SqliteRgbWallet, TapretKey, WalletError, WpkhDescr};
 use rgbstd::indexers::{esplora_blocking, AnyResolver};
-use rgbstd::persistence::fs::FsBinStore;
-use strict_types::encoding::{DecodeError, DeserializeError};
+use rgbstd::persistence::sql::{self, SqliteStock};
 
 use crate::Command;
 
@@ -95,39 +92,24 @@ impl Default for RgbArgs {
 }
 
 impl RgbArgs {
+    /// Name of the SQLite database holding the stock, under the base dir.
+    const STOCK_DB: &'static str = "stock.db";
+
     pub(crate) fn load_stock(
         &self,
         stock_path: impl ToOwned<Owned = PathBuf>,
-    ) -> Result<Stock, WalletError> {
+    ) -> Result<SqliteStock, WalletError> {
         let stock_path = stock_path.to_owned();
 
         if self.verbose > 1 {
             eprint!("Loading stock from `{}` ... ", stock_path.display());
         }
 
-        let provider = FsBinStore::new(stock_path.clone())?;
-        let mut stock = Stock::load(provider, true).or_else(|err| {
-            if err
-                .0
-                .downcast_ref::<DeserializeError>()
-                .map(|e| matches!(e, DeserializeError::Decode(DecodeError::Io(e)) if e.kind() == ErrorKind::NotFound))
-                .unwrap_or_default()
-            {
-                if self.verbose > 1 {
-                    eprint!("stock file is absent, creating a new one ... ");
-                }
-                fs::create_dir_all(&stock_path)?;
-                let provider = FsBinStore::new(stock_path)?;
-                let mut stock = Stock::in_memory();
-                stock
-                    .make_persistent(provider, true)
-                    .map_err(WalletError::StockPersist)?;
-                return Ok(stock);
-            }
-            eprintln!("stock file is damaged, failing");
-            error!("Unable to load stock data: {err:?}");
-            Err(WalletError::StockPersist(err))
-        })?;
+        // `sql::open` creates and migrates the database when it is absent, so
+        // the first run needs no separate initialisation path -- only the
+        // containing directory has to exist.
+        fs::create_dir_all(&stock_path)?;
+        let mut stock = sql::open(stock_path.join(Self::STOCK_DB))?;
 
         if self.sync {
             let resolver = self.resolver()?;
@@ -152,7 +134,7 @@ impl RgbArgs {
         Ok(stock)
     }
 
-    pub fn rgb_stock(&self) -> Result<Stock, WalletError> {
+    pub fn rgb_stock(&self) -> Result<SqliteStock, WalletError> {
         let stock_path = self.general.base_dir();
         let stock = self.load_stock(stock_path)?;
         Ok(stock)
@@ -161,7 +143,7 @@ impl RgbArgs {
     pub fn rgb_wallet(
         &self,
         config: &Config,
-    ) -> Result<RgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>, WalletError> {
+    ) -> Result<SqliteRgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>, WalletError> {
         let stock = self.rgb_stock()?;
         self.rgb_wallet_from_stock(config, stock)
     }
@@ -169,10 +151,10 @@ impl RgbArgs {
     pub fn rgb_wallet_from_stock(
         &self,
         config: &Config,
-        stock: Stock,
-    ) -> Result<RgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>, WalletError> {
+        stock: SqliteStock,
+    ) -> Result<SqliteRgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>, WalletError> {
         let wallet = self.inner.bp_wallet::<RgbDescr<XpubDerivable>>(config)?;
-        let wallet = RgbWallet::new(stock, wallet);
+        let wallet = SqliteRgbWallet::new(stock, wallet);
 
         Ok(wallet)
     }

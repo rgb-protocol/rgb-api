@@ -27,13 +27,10 @@ use std::io;
 use amplify::IoError;
 #[cfg(feature = "bp")]
 use bpwallet::psbt::{ConstructionError, DecodeError};
-use nonasync::persistence::PersistenceError;
 use psrgbt::{CommitError, EmbedError, TapretKeyError};
 use rgbstd::containers::LoadError;
 use rgbstd::contract::{BuilderError, ContractError};
-use rgbstd::persistence::{
-    ComposeError, ConsignError, FasciaError, Stock, StockError, StockErrorAll, StockErrorMem,
-};
+use rgbstd::persistence::{IndexProvider, StashProvider, StateProvider, StockError};
 use rgbstd::validation::ValidationError;
 use rgbstd::{AssignmentType, ChainNet};
 use strict_types::encoding::Ident;
@@ -50,9 +47,11 @@ pub enum WalletError {
     #[from]
     StockLoad(LoadError),
 
-    WalletPersist(PersistenceError),
-
-    StockPersist(PersistenceError),
+    /// error opening the SQLite stock: {0}
+    #[cfg(feature = "sqlite")]
+    #[display(doc_comments)]
+    #[from]
+    StockOpen(rgbstd::persistence::sql::SqlError),
 
     #[cfg(feature = "cli")]
     #[from]
@@ -95,8 +94,6 @@ pub enum WalletError {
     #[display(doc_comments)]
     Resolver(String),
 
-    #[from(StockError)]
-    #[from(StockErrorAll)]
     #[display(inner)]
     Stock(String),
 
@@ -112,8 +109,10 @@ impl From<Infallible> for WalletError {
     fn from(_: Infallible) -> Self { unreachable!() }
 }
 
-impl From<(Stock, WalletError)> for WalletError {
-    fn from((_, e): (Stock, WalletError)) -> Self { e }
+impl<S: StashProvider, H: StateProvider, P: IndexProvider, E: std::error::Error>
+    From<StockError<S, H, P, E>> for WalletError
+{
+    fn from(e: StockError<S, H, P, E>) -> Self { WalletError::Stock(e.to_string()) }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -193,8 +192,6 @@ pub enum CompositionError {
     Builder(BuilderError),
 
     #[from(String)]
-    #[from(StockError)]
-    #[from(StockErrorMem<ComposeError>)]
     #[display(inner)]
     Stock(String),
 
@@ -204,6 +201,12 @@ pub enum CompositionError {
 
     /// unexpected error: {0}
     Unexpected(String),
+}
+
+impl<S: StashProvider, H: StateProvider, P: IndexProvider, E: std::error::Error>
+    From<StockError<S, H, P, E>> for CompositionError
+{
+    fn from(e: StockError<S, H, P, E>) -> Self { CompositionError::Stock(e.to_string()) }
 }
 
 #[derive(Debug, Display, Error, From)]
@@ -227,12 +230,16 @@ pub enum CompletionError {
     Commit(CommitError),
 
     #[from(String)]
-    #[from(StockErrorMem<ConsignError>)]
-    #[from(StockErrorMem<FasciaError>)]
     #[display(inner)]
     Stock(String),
 }
 
 impl From<Infallible> for CompletionError {
     fn from(_: Infallible) -> Self { unreachable!() }
+}
+
+impl<S: StashProvider, H: StateProvider, P: IndexProvider, E: std::error::Error>
+    From<StockError<S, H, P, E>> for CompletionError
+{
+    fn from(e: StockError<S, H, P, E>) -> Self { CompletionError::Stock(e.to_string()) }
 }

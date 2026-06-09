@@ -38,18 +38,18 @@ use rgb::containers::{
 };
 use rgb::indexers::ResolveSpvProof;
 use rgb::invoice::{Beneficiary, Pay2Vout, RgbInvoice, RgbInvoiceBuilder, XChainNet};
-use rgb::persistence::{MemContract, StashReadProvider, Stock};
+use rgb::persistence::sql::SqliteStock;
+use rgb::persistence::{ContractStateRead, StashReadProvider};
 use rgb::resolvers::ContractIssueResolver;
 use rgb::schema::SchemaId;
 use rgb::validation::{ValidationConfig, Validity};
 use rgb::vm::WitnessOrd;
 use rgb::{
     Allocation, BundleId, ContractId, GenesisSeal, GraphSeal, Identity, OpId, Outpoint, OutputSeal,
-    OwnedFraction, RgbDescr, RgbWallet, StateType, TokenIndex, TransferParams, Txid, WalletError,
-    WalletProvider,
+    OwnedFraction, RgbDescr, SqliteRgbWallet, StateType, TokenIndex, TransferParams, Txid,
+    WalletError, WalletProvider,
 };
 use rgbstd::contract::{AllocatedState, AssignmentsFilter, ContractData, ContractOp};
-use rgbstd::persistence::MemContractState;
 use rgbstd::{KnownState, OutputAssignment};
 use serde_crate::Serialize;
 use strict_types::{FieldName, StrictVal};
@@ -272,14 +272,6 @@ pub enum Command {
         dst: Option<PathBuf>,
     },
 
-    /// Debug-dump all stash and inventory data
-    #[display("dump")]
-    Dump {
-        /// Directory to put the dump into
-        #[arg(default_value = "./rgb-dump")]
-        root_dir: String,
-    },
-
     /// Validate transfer consignment
     #[display("validate")]
     Validate {
@@ -333,13 +325,13 @@ impl Exec for RgbArgs {
             }
             Command::Schemata => {
                 let stock = self.rgb_stock()?;
-                for info in stock.schemata()? {
+                for info in stock.schemata().map(|r| r.expect("stash read")) {
                     print!("{info}");
                 }
             }
             Command::Contracts => {
                 let stock = self.rgb_stock()?;
-                for info in stock.contracts()? {
+                for info in stock.contracts().map(|r| r.expect("stash read")) {
                     print!("{info}");
                 }
             }
@@ -471,11 +463,11 @@ impl Exec for RgbArgs {
                 let stock = self.load_stock(stock_path.clone())?;
 
                 enum StockOrWallet {
-                    Stock(Box<Stock>),
-                    Wallet(Box<RgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>>),
+                    Stock(Box<SqliteStock>),
+                    Wallet(Box<SqliteRgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>>),
                 }
                 impl StockOrWallet {
-                    fn stock(&self) -> &Stock {
+                    fn stock(&self) -> &SqliteStock {
                         match self {
                             StockOrWallet::Stock(stock) => stock,
                             StockOrWallet::Wallet(wallet) => wallet.stock(),
@@ -508,8 +500,8 @@ impl Exec for RgbArgs {
                 }
 
                 enum Filter<'w> {
-                    Wallet(&'w RgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>),
-                    WalletAll(&'w RgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>),
+                    Wallet(&'w SqliteRgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>),
+                    WalletAll(&'w SqliteRgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>),
                     NoWallet,
                 }
                 impl AssignmentsFilter for Filter<'_> {
@@ -544,9 +536,9 @@ impl Exec for RgbArgs {
                 }
 
                 println!("\nOwned:");
-                fn witness<S: KnownState>(
+                fn witness<S: KnownState, C: ContractStateRead>(
                     allocation: &OutputAssignment<S>,
-                    contract: &ContractData<MemContract<&MemContractState>>,
+                    contract: &ContractData<C>,
                 ) -> String {
                     allocation
                         .witness
@@ -956,82 +948,6 @@ impl Exec for RgbArgs {
                         contract.save_file(dst)?;
                     }
                 }
-            }
-            Command::Dump { root_dir } => {
-                let stock = self.rgb_stock()?;
-
-                fs::remove_dir_all(root_dir).ok();
-                fs::create_dir_all(format!("{root_dir}/stash/schemata"))?;
-                fs::create_dir_all(format!("{root_dir}/stash/geneses"))?;
-                fs::create_dir_all(format!("{root_dir}/stash/bundles"))?;
-                fs::create_dir_all(format!("{root_dir}/stash/witnesses"))?;
-                fs::create_dir_all(format!("{root_dir}/state"))?;
-                fs::create_dir_all(format!("{root_dir}/index"))?;
-
-                // Stash
-                for (id, schema) in stock.as_stash_provider().debug_schemata() {
-                    fs::write(
-                        format!("{root_dir}/stash/schemata/{}.{id:-#}.yaml", schema.name),
-                        serde_yaml::to_string(&schema)?,
-                    )?;
-                }
-                for (id, genesis) in stock.as_stash_provider().debug_geneses() {
-                    fs::write(
-                        format!("{root_dir}/stash/geneses/{id:-}.yaml"),
-                        serde_yaml::to_string(genesis)?,
-                    )?;
-                }
-                for (id, bundle) in stock.as_stash_provider().debug_bundles() {
-                    fs::write(
-                        format!("{root_dir}/stash/bundles/{id}.yaml"),
-                        serde_yaml::to_string(bundle)?,
-                    )?;
-                }
-                for (id, witness) in stock.as_stash_provider().debug_witnesses() {
-                    fs::write(
-                        format!("{root_dir}/stash/witnesses/{id}.yaml"),
-                        serde_yaml::to_string(witness)?,
-                    )?;
-                }
-                fs::write(
-                    format!("{root_dir}/stash/seal-secret.yaml"),
-                    serde_yaml::to_string(stock.as_stash_provider().debug_secret_seals())?,
-                )?;
-
-                // State
-                fs::write(
-                    format!("{root_dir}/state/witnesses.yaml"),
-                    serde_yaml::to_string(stock.as_state_provider().debug_witnesses())?,
-                )?;
-                for (id, state) in stock.as_state_provider().debug_contracts() {
-                    fs::write(
-                        format!("{root_dir}/state/{id:-}.yaml"),
-                        serde_yaml::to_string(state)?,
-                    )?;
-                }
-
-                // Index
-                fs::write(
-                    format!("{root_dir}/index/op-to-bundle.yaml"),
-                    serde_yaml::to_string(stock.as_index_provider().debug_op_bundle_index())?,
-                )?;
-                fs::write(
-                    format!("{root_dir}/index/bundle-to-contract.yaml"),
-                    serde_yaml::to_string(stock.as_index_provider().debug_bundle_contract_index())?,
-                )?;
-                fs::write(
-                    format!("{root_dir}/index/bundle-to-witness.yaml"),
-                    serde_yaml::to_string(stock.as_index_provider().debug_bundle_witness_index())?,
-                )?;
-                fs::write(
-                    format!("{root_dir}/index/contracts.yaml"),
-                    serde_yaml::to_string(stock.as_index_provider().debug_contract_index())?,
-                )?;
-                fs::write(
-                    format!("{root_dir}/index/terminals.yaml"),
-                    serde_yaml::to_string(stock.as_index_provider().debug_terminal_index())?,
-                )?;
-                eprintln!("Dump is successfully generated and saved to '{root_dir}'");
             }
             Command::Validate { file } => {
                 let stock = self.rgb_stock()?;

@@ -67,3 +67,5 @@ pub mod resolvers {
 }
 pub use filters::WalletFilter;
 pub use wallet::RgbWallet;
+#[cfg(feature = "sqlite")]
+pub use wallet::SqliteRgbWallet;

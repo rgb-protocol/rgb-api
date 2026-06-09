@@ -19,73 +19,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "fs")]
-use std::path::PathBuf;
-
-#[cfg(all(feature = "fs", feature = "bp"))]
-use bpwallet::fs::FsTextStore;
-#[cfg(all(feature = "fs", feature = "bp"))]
-use bpwallet::Wallet;
-#[cfg(all(not(target_arch = "wasm32"), feature = "fs"))]
-use nonasync::persistence::PersistenceProvider;
 use psrgbt::{RgbOutExt, RgbPropKeyExt};
 use rgbstd::containers::Transfer;
 use rgbstd::contract::ContractOp;
 use rgbstd::indexers::ResolveSpvProof;
-#[cfg(feature = "fs")]
-use rgbstd::persistence::fs::FsBinStore;
-use rgbstd::persistence::{
-    IndexProvider, MemIndex, MemStash, MemState, StashProvider, StateProvider, Stock, StockError,
-};
+#[cfg(feature = "sqlite")]
+use rgbstd::persistence::sql::{self, SqlError, SqlIndex, SqlStash, SqlState};
+use rgbstd::persistence::{IndexProvider, StashProvider, StateProvider, Stock, StockError};
 
 use super::{
     CompletionError, CompositionError, ContractId, PayError, TransferParams, WalletProvider,
 };
-#[cfg(all(feature = "fs", feature = "bp"))]
-use super::{DescriptorRgb, WalletError};
 use crate::invoice::RgbInvoice;
 use crate::pay::PsbtMeta;
 
+#[cfg(feature = "sqlite")]
+pub type SqliteRgbWallet<W> = RgbWallet<W, SqlStash, SqlState, SqlIndex>;
+
 #[derive(Getters)]
-pub struct RgbWallet<
-    W: WalletProvider,
-    S: StashProvider = MemStash,
-    H: StateProvider = MemState,
-    I: IndexProvider = MemIndex,
-> {
+pub struct RgbWallet<W: WalletProvider, S: StashProvider, H: StateProvider, I: IndexProvider> {
     stock: Stock<S, H, I>,
     wallet: W,
 }
 
-#[cfg(all(feature = "fs", feature = "bp"))]
-impl<
-        K,
-        D: DescriptorRgb + bpwallet::Descriptor<K>,
-        S: StashProvider,
-        H: StateProvider,
-        I: IndexProvider,
-    > RgbWallet<Wallet<K, D>, S, H, I>
-{
-    #[allow(clippy::result_large_err)]
-    pub fn load(
-        stock_path: PathBuf,
-        wallet_path: PathBuf,
-        autosave: bool,
-    ) -> Result<Self, WalletError>
-    where
-        D: serde::Serialize + for<'de> serde::Deserialize<'de>,
-        FsBinStore: PersistenceProvider<S>,
-        FsBinStore: PersistenceProvider<H>,
-        FsBinStore: PersistenceProvider<I>,
-    {
-        use nonasync::persistence::PersistenceError;
-        let provider = FsBinStore::new(stock_path)
-            .map_err(|e| WalletError::StockPersist(PersistenceError::with(e)))?;
-        let stock = Stock::load(provider, autosave).map_err(WalletError::StockPersist)?;
-        let provider = FsTextStore::new(wallet_path)
-            .map_err(|e| WalletError::WalletPersist(PersistenceError::with(e)))?;
-        let wallet = Wallet::load(provider, autosave).map_err(WalletError::WalletPersist)?;
-        Ok(Self { wallet, stock })
+#[cfg(feature = "sqlite")]
+impl<W: WalletProvider> RgbWallet<W, SqlStash, SqlState, SqlIndex> {
+    pub fn from_sqlite(
+        wallet: W,
+        stock_path: impl AsRef<std::path::Path>,
+    ) -> Result<Self, SqlError> {
+        let stock = sql::open(stock_path)?;
+        Ok(Self::new(stock, wallet))
     }
 }
 

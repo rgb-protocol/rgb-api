@@ -34,6 +34,7 @@ rgb-api = { version = "0.11.1", path = "..", features = [
     "fs",
     "mempool_blocking",
     "serde",
+    "sqlite",
 ] }
 rgb-psbt-utils = { workspace = true, features = [
     "bp",
