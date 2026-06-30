@@ -30,7 +30,7 @@ use bpwallet::psbt::{ConstructionError, DecodeError};
 use psrgbt::{CommitError, EmbedError, TapretKeyError};
 use rgbstd::containers::LoadError;
 use rgbstd::contract::{BuilderError, ContractError};
-use rgbstd::persistence::{IndexProvider, StashProvider, StateProvider, StockError};
+use rgbstd::persistence::{RgbStore, StockError};
 use rgbstd::validation::ValidationError;
 use rgbstd::{AssignmentType, ChainNet};
 use strict_types::encoding::Ident;
@@ -51,7 +51,7 @@ pub enum WalletError {
     #[cfg(feature = "sqlite")]
     #[display(doc_comments)]
     #[from]
-    StockOpen(rgbstd::persistence::sql::SqlError),
+    StockOpen(rgbstd::persistence::sqlite::SqliteError),
 
     #[cfg(feature = "cli")]
     #[from]
@@ -109,10 +109,8 @@ impl From<Infallible> for WalletError {
     fn from(_: Infallible) -> Self { unreachable!() }
 }
 
-impl<S: StashProvider, H: StateProvider, P: IndexProvider, E: std::error::Error>
-    From<StockError<S, H, P, E>> for WalletError
-{
-    fn from(e: StockError<S, H, P, E>) -> Self { WalletError::Stock(e.to_string()) }
+impl<S: RgbStore, E: std::error::Error> From<StockError<S, E>> for WalletError {
+    fn from(e: StockError<S, E>) -> Self { WalletError::Stock(e.to_string()) }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -203,10 +201,8 @@ pub enum CompositionError {
     Unexpected(String),
 }
 
-impl<S: StashProvider, H: StateProvider, P: IndexProvider, E: std::error::Error>
-    From<StockError<S, H, P, E>> for CompositionError
-{
-    fn from(e: StockError<S, H, P, E>) -> Self { CompositionError::Stock(e.to_string()) }
+impl<S: RgbStore, E: std::error::Error> From<StockError<S, E>> for CompositionError {
+    fn from(e: StockError<S, E>) -> Self { CompositionError::Stock(e.to_string()) }
 }
 
 #[derive(Debug, Display, Error, From)]
@@ -238,8 +234,6 @@ impl From<Infallible> for CompletionError {
     fn from(_: Infallible) -> Self { unreachable!() }
 }
 
-impl<S: StashProvider, H: StateProvider, P: IndexProvider, E: std::error::Error>
-    From<StockError<S, H, P, E>> for CompletionError
-{
-    fn from(e: StockError<S, H, P, E>) -> Self { CompletionError::Stock(e.to_string()) }
+impl<S: RgbStore, E: std::error::Error> From<StockError<S, E>> for CompletionError {
+    fn from(e: StockError<S, E>) -> Self { CompletionError::Stock(e.to_string()) }
 }

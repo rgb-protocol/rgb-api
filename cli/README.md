@@ -83,7 +83,7 @@ Commands:
   taprets    List known tapret tweaks for a wallet
   schemata   Prints out list of known RGB schemata
   contracts  Prints out list of known RGB contracts
-  import     Imports RGB data into the stash: contracts, schema, etc
+  import     Imports RGB data into the store: contracts, schema, etc
   export     Exports existing RGB contract
   armor      Convert binary RGB file into a text armored version
   state      Reports information about state of a contract
@@ -95,9 +95,8 @@ Commands:
   consign    Prepare consignment for transferring RGB assets
   transfer   Transfer RGB assets
   inspect    Inspects any RGB data file
-  dump       Debug-dump all stash and inventory data
   validate   Validate transfer consignment
-  accept     Validate transfer consignment & accept to the stash
+  accept     Validate transfer consignment & accept to the store
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -302,7 +301,7 @@ A contract (which also serves as a consignment) will be generated and imported i
 Output:
 
 ```shell
-A new contract rgb:hcRzR8wK-zh$jdpc-Rhsg!uH-WQ!zuV9-h7x877N-BQNcwNM is issued and added to the stash.
+A new contract rgb:hcRzR8wK-zh$jdpc-Rhsg!uH-WQ!zuV9-h7x877N-BQNcwNM is issued and added to the store.
 ```
 
 ### Export contract

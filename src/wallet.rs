@@ -24,8 +24,8 @@ use rgbstd::containers::Transfer;
 use rgbstd::contract::ContractOp;
 use rgbstd::indexers::ResolveSpvProof;
 #[cfg(feature = "sqlite")]
-use rgbstd::persistence::sql::{self, SqlError, SqlIndex, SqlStash, SqlState};
-use rgbstd::persistence::{IndexProvider, StashProvider, StateProvider, Stock, StockError};
+use rgbstd::persistence::sqlite::{SqliteError, SqliteStock, SqliteStore};
+use rgbstd::persistence::{RgbStore, Stock, StockError};
 
 use super::{
     CompletionError, CompositionError, ContractId, PayError, TransferParams, WalletProvider,
@@ -34,38 +34,36 @@ use crate::invoice::RgbInvoice;
 use crate::pay::PsbtMeta;
 
 #[cfg(feature = "sqlite")]
-pub type SqliteRgbWallet<W> = RgbWallet<W, SqlStash, SqlState, SqlIndex>;
+pub type SqliteRgbWallet<W> = RgbWallet<W, SqliteStore>;
 
 #[derive(Getters)]
-pub struct RgbWallet<W: WalletProvider, S: StashProvider, H: StateProvider, I: IndexProvider> {
-    stock: Stock<S, H, I>,
+pub struct RgbWallet<W: WalletProvider, S: RgbStore> {
+    stock: Stock<S>,
     wallet: W,
 }
 
 #[cfg(feature = "sqlite")]
-impl<W: WalletProvider> RgbWallet<W, SqlStash, SqlState, SqlIndex> {
+impl<W: WalletProvider> RgbWallet<W, SqliteStore> {
     pub fn from_sqlite(
         wallet: W,
         stock_path: impl AsRef<std::path::Path>,
-    ) -> Result<Self, SqlError> {
-        let stock = sql::open(stock_path)?;
+    ) -> Result<Self, SqliteError> {
+        let stock = SqliteStock::open(stock_path)?;
         Ok(Self::new(stock, wallet))
     }
 }
 
-impl<W: WalletProvider, S: StashProvider, H: StateProvider, I: IndexProvider>
-    RgbWallet<W, S, H, I>
-{
-    pub fn new(stock: Stock<S, H, I>, wallet: W) -> Self { Self { stock, wallet } }
+impl<W: WalletProvider, S: RgbStore> RgbWallet<W, S> {
+    pub fn new(stock: Stock<S>, wallet: W) -> Self { Self { stock, wallet } }
 
-    pub fn stock_mut(&mut self) -> &mut Stock<S, H, I> { &mut self.stock }
+    pub fn stock_mut(&mut self) -> &mut Stock<S> { &mut self.stock }
 
     pub fn wallet_mut(&mut self) -> &mut W { &mut self.wallet }
 
-    pub fn history(&self, contract_id: ContractId) -> Result<Vec<ContractOp>, StockError<S, H, I>> {
+    pub fn history(&self, contract_id: ContractId) -> Result<Vec<ContractOp>, StockError<S>> {
         let contract = self.stock.contract_data(contract_id)?;
         let wallet = &self.wallet;
-        Ok(contract.history(wallet.filter_outpoints(), wallet.filter_witnesses()))
+        Ok(contract.history(wallet.filter_outpoints(), wallet.filter_witnesses())?)
     }
 
     #[allow(clippy::result_large_err)]
@@ -76,7 +74,7 @@ impl<W: WalletProvider, S: StashProvider, H: StateProvider, I: IndexProvider>
         spv_resolver: Option<&dyn ResolveSpvProof>,
     ) -> Result<(W::Psbt, PsbtMeta, Transfer), PayError> {
         self.wallet
-            .pay::<S, H, I, P, O>(&mut self.stock, invoice, params, spv_resolver)
+            .pay::<S, P, O>(&mut self.stock, invoice, params, spv_resolver)
     }
 
     #[allow(clippy::result_large_err)]
@@ -86,7 +84,7 @@ impl<W: WalletProvider, S: StashProvider, H: StateProvider, I: IndexProvider>
         params: TransferParams,
     ) -> Result<(W::Psbt, PsbtMeta), CompositionError> {
         self.wallet
-            .construct_psbt_rgb::<S, H, I, P, O>(&self.stock, invoice, params)
+            .construct_psbt_rgb::<S, P, O>(&self.stock, invoice, params)
     }
 
     #[allow(clippy::result_large_err)]

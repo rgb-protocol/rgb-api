@@ -26,6 +26,7 @@ bp-wallet = { workspace = true, features = [
 ] }
 rgb-ops = { workspace = true, features = [
     "serde",
+    "sqlite",
 ] }
 rgb-api = { version = "0.11.1", path = "..", features = [
     "cli",

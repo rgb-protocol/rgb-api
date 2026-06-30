@@ -27,7 +27,7 @@ use std::str::FromStr;
 use amplify::confinement::{SmallOrdMap, U16 as MAX16};
 use bpwallet::cli::{BpCommand, Config, Exec};
 use bpwallet::psbt::{Output, PropKey, Psbt, PsbtConstructor, PsbtVer};
-use bpwallet::{Derive, Sats, Wallet, XpubDerivable};
+use bpwallet::{Derive, Sats};
 use psrgbt::bp_conversion_utils::{
     address_payload_bitcoin_from_script_pubkey, network_bp_to_bitcoin, outpoint_bitcoin_to_bp,
     outpoint_bp_to_bitcoin,
@@ -38,22 +38,23 @@ use rgb::containers::{
 };
 use rgb::indexers::ResolveSpvProof;
 use rgb::invoice::{Beneficiary, Pay2Vout, RgbInvoice, RgbInvoiceBuilder, XChainNet};
-use rgb::persistence::sql::SqliteStock;
-use rgb::persistence::{ContractStateRead, StashReadProvider};
 use rgb::resolvers::ContractIssueResolver;
 use rgb::schema::SchemaId;
 use rgb::validation::{ValidationConfig, Validity};
 use rgb::vm::WitnessOrd;
 use rgb::{
     Allocation, BundleId, ContractId, GenesisSeal, GraphSeal, Identity, OpId, Outpoint, OutputSeal,
-    OwnedFraction, RgbDescr, SqliteRgbWallet, StateType, TokenIndex, TransferParams, Txid,
-    WalletError, WalletProvider,
+    OwnedFraction, SqliteRgbWallet, StateType, TokenIndex, TransferParams, Txid, WalletError,
+    WalletProvider,
 };
 use rgbstd::contract::{AllocatedState, AssignmentsFilter, ContractData, ContractOp};
+use rgbstd::persistence::sqlite::SqliteStock;
+use rgbstd::persistence::ContractStateSnapshot;
 use rgbstd::{KnownState, OutputAssignment};
 use serde_crate::Serialize;
 use strict_types::{FieldName, StrictVal};
 
+use crate::args::BpWallet;
 use crate::RgbArgs;
 
 #[derive(Subcommand, Clone, PartialEq, Eq, Debug, Display)]
@@ -64,10 +65,6 @@ pub enum Command {
     #[display(inner)]
     General(bpwallet::cli::Command),
 
-    #[clap(flatten)]
-    #[display(inner)]
-    Debug(DebugCommand),
-
     /// Prints out list of known RGB schemata
     Schemata,
 
@@ -75,7 +72,7 @@ pub enum Command {
     #[display("contracts")]
     Contracts,
 
-    /// Imports RGB data into the stash: schema definitions, consignments, etc
+    /// Imports RGB data into the store: schema definitions, consignments, etc
     #[display("import")]
     Import {
         /// Use BASE64 ASCII armoring for binary data
@@ -279,7 +276,7 @@ pub enum Command {
         file: PathBuf,
     },
 
-    /// Validate transfer consignment & accept to the stash
+    /// Validate transfer consignment & accept to the store
     #[display("accept")]
     Accept {
         /// Force accepting consignments with non-mined terminal witness
@@ -289,14 +286,6 @@ pub enum Command {
         /// File with the transfer consignment
         file: PathBuf,
     },
-}
-
-#[derive(Subcommand, Clone, PartialEq, Eq, Debug, Display)]
-#[display(lowercase)]
-#[clap(hide = true)]
-pub enum DebugCommand {
-    /// List known tapret tweaks for a wallet
-    Taprets,
 }
 
 impl Exec for RgbArgs {
@@ -317,21 +306,15 @@ impl Exec for RgbArgs {
                     .exec(config, "rgb")?;
             }
 
-            Command::Debug(DebugCommand::Taprets) => {
-                let stock = self.rgb_stock()?;
-                for (witness_id, tapret) in stock.as_stash_provider().taprets()? {
-                    println!("{witness_id}\t{tapret}");
-                }
-            }
             Command::Schemata => {
                 let stock = self.rgb_stock()?;
-                for info in stock.schemata().map(|r| r.expect("stash read")) {
+                for info in stock.schemata().map(|r| r.expect("store read")) {
                     print!("{info}");
                 }
             }
             Command::Contracts => {
                 let stock = self.rgb_stock()?;
-                for info in stock.contracts().map(|r| r.expect("stash read")) {
+                for info in stock.contracts().map(|r| r.expect("store read")) {
                     print!("{info}");
                 }
             }
@@ -464,7 +447,7 @@ impl Exec for RgbArgs {
 
                 enum StockOrWallet {
                     Stock(Box<SqliteStock>),
-                    Wallet(Box<SqliteRgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>>),
+                    Wallet(Box<SqliteRgbWallet<BpWallet>>),
                 }
                 impl StockOrWallet {
                     fn stock(&self) -> &SqliteStock {
@@ -500,8 +483,8 @@ impl Exec for RgbArgs {
                 }
 
                 enum Filter<'w> {
-                    Wallet(&'w SqliteRgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>),
-                    WalletAll(&'w SqliteRgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>),
+                    Wallet(&'w SqliteRgbWallet<BpWallet>),
+                    WalletAll(&'w SqliteRgbWallet<BpWallet>),
                     NoWallet,
                 }
                 impl AssignmentsFilter for Filter<'_> {
@@ -536,51 +519,53 @@ impl Exec for RgbArgs {
                 }
 
                 println!("\nOwned:");
-                fn witness<S: KnownState, C: ContractStateRead>(
+                fn witness<S: KnownState>(
                     allocation: &OutputAssignment<S>,
-                    contract: &ContractData<C>,
+                    contract: &ContractData<ContractStateSnapshot>,
                 ) -> String {
                     allocation
                         .witness
-                        .and_then(|w| contract.witness_info(w))
+                        .and_then(|w| match contract.witness_info(w) {
+                            Ok(info) => info,
+                            // the snapshot is already in memory, so the read
+                            // this goes through cannot fail
+                            Err(never) => match never {},
+                        })
                         .map(|info| format!("{} ({})", info.id, info.ord))
                         .unwrap_or_else(|| s!("~"))
                 }
                 for details in contract.rules.schema().owned_types.values() {
                     println!("  State      \t{:78}\tWitness", "Seal");
                     println!("  {}:", details.name);
-                    if let Ok(allocations) = contract.fungible(details.name.clone(), &filter) {
-                        for allocation in allocations {
-                            println!(
-                                "    {: >9}\t{}\t{} {}",
-                                allocation.state.value(),
-                                allocation.seal,
-                                witness(&allocation, &contract),
-                                filter.comment(allocation.seal.to_outpoint())
-                            );
-                        }
+                    for allocation in contract.fungible(details.name.clone(), &filter) {
+                        let allocation = allocation?;
+                        println!(
+                            "    {: >9}\t{}\t{} {}",
+                            allocation.state.value(),
+                            allocation.seal,
+                            witness(&allocation, &contract),
+                            filter.comment(allocation.seal.to_outpoint())
+                        );
                     }
-                    if let Ok(allocations) = contract.data(details.name.clone(), &filter) {
-                        for allocation in allocations {
-                            println!(
-                                "    {: >9}\t{}\t{} {}",
-                                allocation.state,
-                                allocation.seal,
-                                witness(&allocation, &contract),
-                                filter.comment(allocation.seal.to_outpoint())
-                            );
-                        }
+                    for allocation in contract.data(details.name.clone(), &filter) {
+                        let allocation = allocation?;
+                        println!(
+                            "    {: >9}\t{}\t{} {}",
+                            allocation.state,
+                            allocation.seal,
+                            witness(&allocation, &contract),
+                            filter.comment(allocation.seal.to_outpoint())
+                        );
                     }
-                    if let Ok(allocations) = contract.rights(details.name.clone(), &filter) {
-                        for allocation in allocations {
-                            println!(
-                                "    {: >9}\t{}\t{} {}",
-                                "right",
-                                allocation.seal,
-                                witness(&allocation, &contract),
-                                filter.comment(allocation.seal.to_outpoint())
-                            );
-                        }
+                    for allocation in contract.rights(details.name.clone(), &filter) {
+                        let allocation = allocation?;
+                        println!(
+                            "    {: >9}\t{}\t{} {}",
+                            "right",
+                            allocation.seal,
+                            witness(&allocation, &contract),
+                            filter.comment(allocation.seal.to_outpoint())
+                        );
                     }
                 }
             }
@@ -681,7 +666,7 @@ impl Exec for RgbArgs {
                 let id = contract.contract_id();
                 stock.import_contract(contract, &ContractIssueResolver)?;
                 eprintln!(
-                    "A new contract {id} is issued and added to the stash.\nUse `export` command \
+                    "A new contract {id} is issued and added to the store.\nUse `export` command \
                      to export the contract."
                 );
             }
@@ -826,10 +811,10 @@ impl Exec for RgbArgs {
                 let mut wallet = self.rgb_wallet(&config)?;
                 let mut psbt_file = File::open(psbt_name)?;
                 let mut psbt = Psbt::decode(&mut psbt_file)?;
-                // the SPV proofs missing from the stash are retrieved while composing, so
+                // the SPV proofs missing from the store are retrieved while composing, so
                 // that the counterparty can verify the witnesses from block headers alone.
                 // Composing with no indexer configured stays possible: the consignment then
-                // carries just the proofs the stash already has
+                // carries just the proofs the store already has
                 let spv_resolver = self.resolver_opt()?;
                 let transfer = wallet
                     .transfer(
@@ -981,7 +966,7 @@ impl Exec for RgbArgs {
                 };
                 let valid = transfer.validate(&schema_rules, &resolver, &validation_config)?;
                 stock.accept_transfer(valid, &resolver)?;
-                eprintln!("Transfer accepted into the stash");
+                eprintln!("Transfer accepted into the store");
             }
         }
         Ok(())

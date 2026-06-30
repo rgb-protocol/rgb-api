@@ -19,7 +19,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::convert::Infallible;
 
 use amplify::confinement::{Confined, U24};
@@ -29,15 +29,17 @@ use rgbstd::containers::{Batch, BuilderSeal, Transfer};
 use rgbstd::contract::{AllocatedState, AssignmentsFilter, BuilderError};
 use rgbstd::indexers::ResolveSpvProof;
 use rgbstd::invoice::{Amount, Beneficiary, InvoiceState, RgbInvoice};
-use rgbstd::persistence::{IndexProvider, StashInconsistency, StashProvider, StateProvider, Stock};
+use rgbstd::persistence::{
+    AllocKind, AllocationFilter, Inconsistency, RgbStore, Stock, Visibility,
+};
 use rgbstd::rgbcore::dbc::tapret::{TapretCommitment, TapretProof};
 use rgbstd::rgbcore::dbc::Proof;
 use rgbstd::rgbcore::seals::txout::{CloseMethod, ExplicitSeal};
 use rgbstd::rgbcore::secp256k1::rand;
 use rgbstd::validation::WitnessOrdProvider;
 use rgbstd::{
-    AssignmentType, ContractId, GraphSeal, Opout, Outpoint, OutputSeal, RevealedData, Transition,
-    TransitionType, Txid,
+    AssignmentType, ContractId, GraphSeal, Outpoint, OutputSeal, RevealedData, RevealedValue,
+    Transition, TransitionType, Txid, VoidState,
 };
 
 use crate::filters::{Filter, WalletFilter};
@@ -94,38 +96,9 @@ struct PaymentContext {
     transition_type: TransitionType,
 }
 
-struct ContractOutpointsFilter<
-    'stock,
-    'wallet,
-    W: WalletProvider + ?Sized,
-    S: StashProvider,
-    H: StateProvider,
-    I: IndexProvider,
-> {
-    contract_id: ContractId,
-    stock: &'stock Stock<S, H, I>,
-    wallet: &'wallet W,
-}
-
-impl<W: WalletProvider + ?Sized, S: StashProvider, H: StateProvider, I: IndexProvider>
-    AssignmentsFilter for ContractOutpointsFilter<'_, '_, W, S, H, I>
-{
-    fn should_include(&self, outpoint: impl Into<Outpoint>, witness_id: Option<Txid>) -> bool {
-        let outpoint = outpoint.into();
-        if !self
-            .wallet
-            .filter_unspent()
-            .should_include(outpoint, witness_id)
-        {
-            return false;
-        }
-        matches!(self.stock.contract_assignments_for(self.contract_id, [outpoint]), Ok(list) if !list.is_empty())
-    }
-}
-
 #[allow(clippy::result_large_err)]
-fn validate_contract_and_invoice<S: StashProvider, H: StateProvider, I: IndexProvider>(
-    stock: &Stock<S, H, I>,
+fn validate_contract_and_invoice<S: RgbStore>(
+    stock: &Stock<S>,
     invoice: &RgbInvoice,
 ) -> Result<PaymentContext, CompositionError> {
     let contract_id = invoice.contract.ok_or(CompositionError::NoContract)?;
@@ -140,9 +113,10 @@ fn validate_contract_and_invoice<S: StashProvider, H: StateProvider, I: IndexPro
     }
 
     let contract_genesis = stock
-        .as_stash_provider()
+        .as_store()
         .genesis(contract_id)
-        .map_err(|_| CompositionError::UnknownContract)?;
+        .map_err(|_| CompositionError::UnknownContract)?
+        .ok_or(CompositionError::UnknownContract)?;
     let contract_chain_net = contract_genesis.chain_net;
     let invoice_chain_net = invoice.chain_network();
     if contract_chain_net != invoice_chain_net {
@@ -198,25 +172,34 @@ fn validate_contract_and_invoice<S: StashProvider, H: StateProvider, I: IndexPro
 }
 
 #[allow(clippy::result_large_err)]
-fn select_state_for_invoice<S: StashProvider, H: StateProvider, I: IndexProvider>(
-    stock: &Stock<S, H, I>,
+fn select_state_for_invoice<S: RgbStore>(
+    stock: &Stock<S>,
     invoice: &RgbInvoice,
     context: &PaymentContext,
     filter: &impl AssignmentsFilter,
 ) -> Result<BTreeSet<OutputSeal>, CompositionError> {
-    let contract = stock
-        .contract_data(context.contract_id)
-        .map_err(|e| e.to_string())?;
-
     let Some(ref assignment_state) = invoice.assignment_state else {
         return Err(CompositionError::NoAssignmentState);
     };
 
+    // only the family and assignment type this invoice pays with
+    let scope = |kind| {
+        AllocationFilter::all(Visibility::Valid)
+            .kind(kind)
+            .type_id(context.assignment_type)
+    };
+
     let prev_outputs = match assignment_state {
         InvoiceState::Amount(amount) => {
+            let allocations: Vec<_> = stock
+                .allocations::<RevealedValue>(context.contract_id, scope(AllocKind::Fungible))
+                .map_err(|e| e.to_string())?;
             let mut state: BTreeMap<_, Vec<Amount>> = BTreeMap::new();
-            for a in contract.fungible_raw(context.assignment_type, filter)? {
-                state.entry(a.seal).or_default().push(a.state);
+            for a in allocations
+                .into_iter()
+                .filter(|a| filter.should_include(a.seal, a.witness))
+            {
+                state.entry(a.seal).or_default().push(a.state.into());
             }
             let mut state: Vec<_> = state
                 .into_iter()
@@ -246,15 +229,21 @@ fn select_state_for_invoice<S: StashProvider, H: StateProvider, I: IndexProvider
         }
         InvoiceState::Data(NonFungible::FractionedToken(allocation)) => {
             let data_state = RevealedData::from(*allocation);
-            contract
-                .data_raw(context.assignment_type, filter)?
-                .filter(|x| x.state == data_state)
-                .map(|x| x.seal)
+            stock
+                .allocations::<RevealedData>(context.contract_id, scope(AllocKind::Structured))
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .filter(|a| filter.should_include(a.seal, a.witness))
+                .filter(|a| a.state == data_state)
+                .map(|a| a.seal)
                 .collect::<BTreeSet<_>>()
         }
-        InvoiceState::Void => contract
-            .rights_raw(context.assignment_type, filter)?
-            .map(|x| x.seal)
+        InvoiceState::Void => stock
+            .allocations::<VoidState>(context.contract_id, scope(AllocKind::Declarative))
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter(|a| filter.should_include(a.seal, a.witness))
+            .map(|a| a.seal)
             .collect::<BTreeSet<_>>(),
     };
 
@@ -262,8 +251,8 @@ fn select_state_for_invoice<S: StashProvider, H: StateProvider, I: IndexProvider
 }
 
 #[allow(clippy::result_large_err)]
-fn build_main_transition<S: StashProvider, H: StateProvider, I: IndexProvider>(
-    stock: &Stock<S, H, I>,
+fn build_main_transition<S: RgbStore>(
+    stock: &Stock<S>,
     invoice: &RgbInvoice,
     context: &PaymentContext,
     prev_outputs: &BTreeSet<OutputSeal>,
@@ -376,8 +365,8 @@ fn create_change_output_seal(
 }
 
 #[allow(clippy::result_large_err)]
-fn build_extra_transitions<S: StashProvider, H: StateProvider, I: IndexProvider>(
-    stock: &Stock<S, H, I>,
+fn build_extra_transitions<S: RgbStore>(
+    stock: &Stock<S>,
     contract_id: ContractId,
     prev_outputs: &BTreeSet<OutputSeal>,
     meta: &PsbtMeta,
@@ -388,32 +377,20 @@ fn build_extra_transitions<S: StashProvider, H: StateProvider, I: IndexProvider>
         .collect::<HashSet<OutputSeal>>();
 
     // Enumerate state for other contracts
-    let mut extra_state =
-        HashMap::<ContractId, HashMap<OutputSeal, HashMap<Opout, AllocatedState>>>::new();
-    for id in stock
-        .contracts_assigning(prev_outputs_set.iter().copied())
-        .map_err(|e| e.to_string())?
-    {
-        // Skip current contract
-        if id == contract_id {
-            continue;
-        }
-        let state = stock
-            .contract_assignments_for(id, prev_outputs_set.iter().copied())
-            .map_err(|e| e.to_string())?;
-        let entry = extra_state.entry(id).or_default();
-        for (seal, assigns) in state {
-            entry.entry(seal).or_default().extend(assigns);
-        }
-    }
+    let mut extra_state = stock
+        .assignments_by_contract(prev_outputs_set.iter().copied())
+        .map_err(|e| e.to_string())?;
+    // Skip current contract
+    extra_state.remove(&contract_id);
 
     // Construct transitions for extra state
     let mut extras = Confined::<Vec<_>, 0, { U24 - 1 }>::with_capacity(extra_state.len());
     for (id, seal_map) in extra_state {
         let schema = stock
-            .as_stash_provider()
+            .as_store()
             .contract_schema(id)
-            .map_err(|_| BuilderError::Inconsistency(StashInconsistency::ContractAbsent(id)))?;
+            .map_err(|_| BuilderError::Inconsistency(Inconsistency::ContractAbsent(id)))?
+            .ok_or(BuilderError::Inconsistency(Inconsistency::ContractAbsent(id)))?;
 
         for (_output, assigns) in seal_map {
             for (opout, state) in assigns {
@@ -480,20 +457,14 @@ pub trait WalletProvider {
     ) -> Result<(), Box<WalletError>>;
 
     #[allow(clippy::result_large_err)]
-    fn pay<
-        S: StashProvider,
-        H: StateProvider,
-        I: IndexProvider,
-        P: RgbPropKeyExt,
-        O: RgbOutExt<P>,
-    >(
+    fn pay<S: RgbStore, P: RgbPropKeyExt, O: RgbOutExt<P>>(
         &mut self,
-        stock: &mut Stock<S, H, I>,
+        stock: &mut Stock<S>,
         invoice: &RgbInvoice,
         params: TransferParams,
         spv_resolver: Option<&dyn ResolveSpvProof>,
     ) -> Result<(Self::Psbt, PsbtMeta, Transfer), PayError> {
-        let (mut psbt, meta) = self.construct_psbt_rgb::<S, H, I, P, O>(stock, invoice, params)?;
+        let (mut psbt, meta) = self.construct_psbt_rgb::<S, P, O>(stock, invoice, params)?;
         // ... here we pass PSBT around signers, if necessary
         let transfer =
             match self.transfer(stock, invoice, &mut psbt, meta.beneficiary_vout, spv_resolver) {
@@ -513,15 +484,9 @@ pub trait WalletProvider {
     ) -> Result<(Self::Psbt, PsbtMeta), CompositionError>;
 
     #[allow(clippy::result_large_err)]
-    fn construct_psbt_rgb<
-        S: StashProvider,
-        H: StateProvider,
-        I: IndexProvider,
-        P: RgbPropKeyExt,
-        O: RgbOutExt<P>,
-    >(
+    fn construct_psbt_rgb<S: RgbStore, P: RgbPropKeyExt, O: RgbOutExt<P>>(
         &mut self,
-        stock: &Stock<S, H, I>,
+        stock: &Stock<S>,
         invoice: &RgbInvoice,
         params: TransferParams,
     ) -> Result<(Self::Psbt, PsbtMeta), CompositionError> {
@@ -531,12 +496,8 @@ pub trait WalletProvider {
         let context = validate_contract_and_invoice(stock, invoice)?;
 
         // 2. Select state for the invoice
-        let filter = ContractOutpointsFilter {
-            contract_id: context.contract_id,
-            stock,
-            wallet: self,
-        };
-        let prev_outputs = select_state_for_invoice(stock, invoice, &context, &filter)?;
+        let prev_outputs =
+            select_state_for_invoice(stock, invoice, &context, &self.filter_unspent())?;
 
         if prev_outputs.is_empty() {
             return Err(CompositionError::InsufficientState);
@@ -564,9 +525,9 @@ pub trait WalletProvider {
     }
 
     #[allow(clippy::result_large_err)]
-    fn transfer<S: StashProvider, H: StateProvider, P: IndexProvider>(
+    fn transfer<S: RgbStore>(
         &mut self,
-        stock: &mut Stock<S, H, P>,
+        stock: &mut Stock<S>,
         invoice: &RgbInvoice,
         psbt: &mut Self::Psbt,
         beneficiary_vout: Option<u32>,
@@ -611,8 +572,11 @@ pub trait WalletProvider {
         stock
             .consume_fascia(fascia, FasciaResolver { witness_id })
             .map_err(|e| e.to_string())?;
-        let transfer = stock
+        let (transfer, retrieved_spv_proofs) = stock
             .transfer(contract_id, beneficiary2, beneficiary1, [], Some(witness_id), spv_resolver)
+            .map_err(|e| e.to_string())?;
+        stock
+            .store_spv_proofs(retrieved_spv_proofs)
             .map_err(|e| e.to_string())?;
 
         Ok(transfer)

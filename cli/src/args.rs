@@ -30,9 +30,11 @@ use bpwallet::{Network, Wallet, XpubDerivable};
 use rgb::validation::ResolveWitness;
 use rgb::{ChainNet, RgbDescr, SqliteRgbWallet, TapretKey, WalletError, WpkhDescr};
 use rgbstd::indexers::{esplora_blocking, AnyResolver};
-use rgbstd::persistence::sql::{self, SqliteStock};
+use rgbstd::persistence::sqlite::SqliteStock;
 
 use crate::Command;
+
+pub(crate) type BpWallet = Wallet<XpubDerivable, RgbDescr<XpubDerivable>>;
 
 #[derive(Args, Clone, PartialEq, Eq, Debug)]
 #[group()]
@@ -97,19 +99,21 @@ impl RgbArgs {
 
     pub(crate) fn load_stock(
         &self,
-        stock_path: impl ToOwned<Owned = PathBuf>,
+        stock_dir: impl ToOwned<Owned = PathBuf>,
     ) -> Result<SqliteStock, WalletError> {
-        let stock_path = stock_path.to_owned();
+        let stock_dir = stock_dir.to_owned();
+        let stock_path = stock_dir.join(Self::STOCK_DB);
 
         if self.verbose > 1 {
             eprint!("Loading stock from `{}` ... ", stock_path.display());
         }
 
-        // `sql::open` creates and migrates the database when it is absent, so
-        // the first run needs no separate initialisation path -- only the
-        // containing directory has to exist.
-        fs::create_dir_all(&stock_path)?;
-        let mut stock = sql::open(stock_path.join(Self::STOCK_DB))?;
+        // `SqliteStock::open` creates and migrates the database when it is
+        // absent, so the first run needs no separate initialisation path --
+        // only the containing directory has to exist.
+        fs::create_dir_all(&stock_dir)?;
+        let mut stock =
+            SqliteStock::open(&stock_path).map_err(|err| WalletError::Stock(err.to_string()))?;
 
         if self.sync {
             let resolver = self.resolver()?;
@@ -135,15 +139,11 @@ impl RgbArgs {
     }
 
     pub fn rgb_stock(&self) -> Result<SqliteStock, WalletError> {
-        let stock_path = self.general.base_dir();
-        let stock = self.load_stock(stock_path)?;
-        Ok(stock)
+        let stock_dir = self.general.base_dir();
+        self.load_stock(stock_dir)
     }
 
-    pub fn rgb_wallet(
-        &self,
-        config: &Config,
-    ) -> Result<SqliteRgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>, WalletError> {
+    pub fn rgb_wallet(&self, config: &Config) -> Result<SqliteRgbWallet<BpWallet>, WalletError> {
         let stock = self.rgb_stock()?;
         self.rgb_wallet_from_stock(config, stock)
     }
@@ -152,11 +152,9 @@ impl RgbArgs {
         &self,
         config: &Config,
         stock: SqliteStock,
-    ) -> Result<SqliteRgbWallet<Wallet<XpubDerivable, RgbDescr<XpubDerivable>>>, WalletError> {
+    ) -> Result<SqliteRgbWallet<BpWallet>, WalletError> {
         let wallet = self.inner.bp_wallet::<RgbDescr<XpubDerivable>>(config)?;
-        let wallet = SqliteRgbWallet::new(stock, wallet);
-
-        Ok(wallet)
+        Ok(SqliteRgbWallet::new(stock, wallet))
     }
 
     pub fn resolver(&self) -> Result<AnyResolver, WalletError> {

@@ -1894,7 +1894,7 @@ dependencies = [
 [[package]]
 name = "rgb-consensus"
 version = "0.11.1"
-source = "git+https://github.com/rgb-protocol/rgb-consensus?rev=e511258a#e511258a5a6cc0392b351b47abfe7f79cc93aa03"
+source = "git+https://github.com/rgb-protocol/rgb-consensus?rev=d4871022#d4871022deaf195479897f30ad838bd67f5c8958"
 dependencies = [
  "amplify",
  "baid64",
@@ -1920,7 +1920,7 @@ dependencies = [
 [[package]]
 name = "rgb-invoicing"
 version = "0.11.1"
-source = "git+https://github.com/rgb-protocol/rgb-ops?rev=729bcfc#729bcfc3238bed2140637896462b01fd9656e568"
+source = "git+https://github.com/rgb-protocol/rgb-ops?rev=b69eafc#b69eafc5481200aeef900a4ca15b2c3d5363d48d"
 dependencies = [
  "amplify",
  "baid64",
@@ -1937,7 +1937,7 @@ dependencies = [
 [[package]]
 name = "rgb-ops"
 version = "0.11.1"
-source = "git+https://github.com/rgb-protocol/rgb-ops?rev=729bcfc#729bcfc3238bed2140637896462b01fd9656e568"
+source = "git+https://github.com/rgb-protocol/rgb-ops?rev=b69eafc#b69eafc5481200aeef900a4ca15b2c3d5363d48d"
 dependencies = [
  "amplify",
  "baid64",
@@ -1946,7 +1946,6 @@ dependencies = [
  "electrum-client",
  "esplora-client",
  "getrandom 0.3.4",
- "rand 0.9.5",
  "rgb-aluvm",
  "rgb-ascii-armor",
  "rgb-consensus",
