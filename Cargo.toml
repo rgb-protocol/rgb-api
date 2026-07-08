@@ -32,8 +32,8 @@ rgb-strict-types = "1.0.1"
 bp-wallet = { version = "0.11.1-alpha.2" }
 rgb-ops = { version = "0.11.1-rc.10" }
 rgb-psbt-utils = { version = "0.11.1-rc.10", path = "psbt" }
-indexmap = "2.4.0"
-chrono = "0.4.38"
+indexmap = "2.14.0"
+chrono = "0.4.45"
 serde_crate = { package = "serde", version = "1", features = [
     "derive",
 ] }
@@ -66,7 +66,7 @@ amplify = { workspace = true }
 nonasync = { workspace = true }
 baid64 = { workspace = true }
 rgb-strict-types = { workspace = true }
-bdk_wallet = { version = "=2.0.0", default-features = false, optional = true, features = [
+bdk_wallet = { version = "3.1.0", default-features = false, optional = true, features = [
     "file_store",
     "keys-bip39",
     "std",
@@ -78,7 +78,6 @@ indexmap = { workspace = true }
 chrono = { workspace = true }
 serde_crate = { workspace = true, optional = true }
 serde_yaml = { workspace = true, optional = true }
-log = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
@@ -99,7 +98,6 @@ all = [
     "electrum_blocking",
     "esplora_blocking",
     "fs",
-    "log",
     "mempool_blocking",
     "serde",
 ]
