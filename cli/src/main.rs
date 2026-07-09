@@ -54,7 +54,7 @@ fn run() -> Result<(), WalletError> {
     let mut args = RgbArgs::parse();
     args.process();
     LogLevel::from_verbosity_flag_count(args.verbose).apply();
-    trace!("Command-line arguments: {:#?}", &args);
+    trace!("Command-line arguments: {:#?}", args);
 
     if args.verbose > 3 {
         eprintln!("RGB: command-line wallet for RGB smart contracts");
