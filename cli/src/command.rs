@@ -34,8 +34,8 @@ use psrgbt::bp_conversion_utils::{
     outpoint_bp_to_bitcoin,
 };
 use rgb::containers::{
-    BuilderSeal, ConsignmentExt, ContainerVer, Contract, FileContent, SecretSeals, Transfer,
-    UniversalFile,
+    BuilderSeal, ConsignmentExt, ContainerVer, FileContent, SecretSeals, Transfer,
+    UncheckedContract, UncheckedTransfer, UniversalFile,
 };
 use rgb::invoice::{Beneficiary, Pay2Vout, RgbInvoice, RgbInvoiceBuilder, XChainNet};
 use rgb::persistence::{MemContract, StashReadProvider, Stock};
@@ -51,7 +51,7 @@ use rgb::{
 use rgbstd::contract::{AllocatedState, AssignmentsFilter, ContractData, ContractOp};
 use rgbstd::persistence::MemContractState;
 use rgbstd::{KnownState, OutputAssignment};
-use serde_crate::{Deserialize, Serialize};
+use serde_crate::Serialize;
 use strict_types::{FieldName, StrictVal};
 
 use crate::RgbArgs;
@@ -867,8 +867,7 @@ impl Exec for RgbArgs {
                 }
             }
             Command::Inspect { file, dir, path } => {
-                #[derive(Clone, Debug)]
-                #[derive(Serialize, Deserialize)]
+                #[derive(Clone, Debug, Serialize)]
                 #[serde(crate = "serde_crate", rename_all = "camelCase")]
                 pub struct ConsignmentInspection {
                     version: ContainerVer,
@@ -922,7 +921,9 @@ impl Exec for RgbArgs {
                 dst,
             } => {
                 let file = File::open(src)?;
-                let transfer: Transfer = serde_yaml::from_reader(&file)?;
+                let transfer = serde_yaml::from_reader::<_, UncheckedTransfer>(&file)?
+                    .into_checked()
+                    .map_err(|err| err.to_string())?;
                 match dst {
                     None => println!("{transfer}"),
                     Some(dst) => {
@@ -936,7 +937,9 @@ impl Exec for RgbArgs {
                 dst,
             } => {
                 let file = File::open(src)?;
-                let contract: Contract = serde_yaml::from_reader(&file)?;
+                let contract = serde_yaml::from_reader::<_, UncheckedContract>(&file)?
+                    .into_checked()
+                    .map_err(|err| err.to_string())?;
                 match dst {
                     None => println!("{contract}"),
                     Some(dst) => {
