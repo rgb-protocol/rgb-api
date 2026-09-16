@@ -11,7 +11,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.11.1-rc.11"
+version = "0.11.1"
 keywords = ["bitcoin", "lightning", "rgb", "smart-contracts", "lnp-bp"]
 categories = ["cryptography::cryptocurrencies"]
 authors = ["Zoe Faltibà <zoefaltiba@gmail.com>"]
@@ -27,11 +27,11 @@ nonasync = { version = "=0.1.3", features = [
     "log",
 ] }
 baid64 = "=0.4.1"
-rgb-strict-encoding = "1.0.2"
-rgb-strict-types = "1.0.2"
+rgb-strict-encoding = "1.0.4"
+rgb-strict-types = "1.0.4"
 bp-wallet = { version = "0.11.1-alpha.2" }
-rgb-ops = { version = "0.11.1-rc.11" }
-rgb-psbt-utils = { version = "0.11.1-rc.11", path = "psbt" }
+rgb-ops = { version = "0.11.1" }
+rgb-psbt-utils = { version = "0.11.1", path = "psbt" }
 indexmap = "2.14.0"
 chrono = "0.4.45"
 serde_crate = { package = "serde", version = "1", features = [
