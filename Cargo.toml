@@ -49,7 +49,6 @@ version.workspace = true
 description = "RGB smart contracts wallet runtime"
 keywords.workspace = true
 categories.workspace = true
-readme = "README.md"
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
