@@ -25,7 +25,6 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use amplify::confinement::{SmallOrdMap, U16 as MAX16};
-use baid64::DisplayBaid64;
 use bpwallet::cli::{BpCommand, Config, Exec};
 use bpwallet::psbt::{Output, PropKey, Psbt, PsbtConstructor, PsbtVer};
 use bpwallet::{Derive, Sats, Wallet, XpubDerivable};
@@ -34,15 +33,16 @@ use psrgbt::bp_conversion_utils::{
     outpoint_bp_to_bitcoin,
 };
 use rgb::containers::{
-    BuilderSeal, ConsignmentExt, ContainerVer, FileContent, SecretSeals, Transfer,
+    BuilderSeal, ConsignmentExt, ConsignmentVer, FileContent, TerminalSeals, Transfer,
     UncheckedContract, UncheckedTransfer, UniversalFile,
 };
+use rgb::indexers::ResolveSpvProof;
 use rgb::invoice::{Beneficiary, Pay2Vout, RgbInvoice, RgbInvoiceBuilder, XChainNet};
 use rgb::persistence::{MemContract, StashReadProvider, Stock};
 use rgb::resolvers::ContractIssueResolver;
 use rgb::schema::SchemaId;
 use rgb::validation::{ValidationConfig, Validity};
-use rgb::vm::{RgbIsa, WitnessOrd};
+use rgb::vm::WitnessOrd;
 use rgb::{
     Allocation, BundleId, ContractId, GenesisSeal, GraphSeal, Identity, OpId, Outpoint, OutputSeal,
     OwnedFraction, RgbDescr, RgbWallet, StateType, TokenIndex, TransferParams, Txid, WalletError,
@@ -75,7 +75,7 @@ pub enum Command {
     #[display("contracts")]
     Contracts,
 
-    /// Imports RGB data into the stash: contracts, schema, etc
+    /// Imports RGB data into the stash: schema definitions, consignments, etc
     #[display("import")]
     Import {
         /// Use BASE64 ASCII armoring for binary data
@@ -400,40 +400,38 @@ impl Exec for RgbArgs {
                 // TODO: Support armored files
                 let content = UniversalFile::load_file(file)?;
                 match content {
-                    UniversalFile::Kit(kit) => {
-                        let id = kit.kit_id();
-                        eprintln!("Importing kit {id}:");
-                        let mut schema_names = map![];
-                        for schema in &kit.schemata {
-                            let schema_id = schema.schema_id();
-                            schema_names.insert(schema_id, &schema.name);
-                            eprintln!("- schema {} {:-}", schema.name, schema_id);
+                    UniversalFile::SchemaDefinition(schema_def) => {
+                        let schema_id = schema_def.schema_id();
+                        eprintln!("Importing schema definition {schema_id}:");
+                        eprintln!("- schema {} {schema_id:-}", schema_def.schema.name);
+                        for lib in schema_def.libs.values() {
+                            eprintln!("- type library {} {}", lib.name, lib.id());
                         }
-                        for lib in &kit.scripts {
-                            eprintln!("- script library {}", lib.id());
+                        for lib_id in schema_def.scripts.keys() {
+                            eprintln!("- script library {lib_id}");
                         }
-                        eprintln!("- strict types: {} definitions", kit.types.len());
-                        let kit = kit.validate().map_err(|err| format!("{err:?}"))?;
-                        stock.import_kit(kit)?;
-                        eprintln!("Kit is imported");
+                        // Verified on import: the type system is rebuilt from the
+                        // libraries above and checked against the ids the schema
+                        // commits to.
+                        stock.import_schema_definition(schema_def)?;
+                        eprintln!("Schema definition is imported and verified");
                     }
                     UniversalFile::Contract(contract) => {
                         let id = contract.consignment_id();
                         eprintln!("Importing consignment {id}:");
                         let resolver = self.resolver()?;
                         eprint!("- validating the contract {} ... ", contract.contract_id());
+                        let schema_rules = stock.schema_rules(contract.schema_id())?;
                         let validation_config = ValidationConfig {
                             chain_net: self.chain_net(),
-                            trusted_typesystem: stock.as_stash_provider().type_system()?.clone(),
                             ..Default::default()
                         };
-                        let contract =
-                            contract
-                                .validate(&resolver, &validation_config)
-                                .map_err(|status| {
-                                    eprintln!("failure");
-                                    status.to_string()
-                                })?;
+                        let contract = contract
+                            .validate(&schema_rules, &resolver, &validation_config)
+                            .map_err(|status| {
+                                eprintln!("failure");
+                                status.to_string()
+                            })?;
                         eprintln!("success");
                         stock.import_contract(contract, &resolver)?;
                         eprintln!("Consignment is imported");
@@ -502,7 +500,7 @@ impl Exec for RgbArgs {
                 let contract = stock_wallet.stock().contract_data(*contract_id)?;
 
                 println!("\nGlobal:");
-                for global_details in contract.schema.global_types.values() {
+                for global_details in contract.rules.schema().global_types.values() {
                     let values = contract.global(global_details.name.clone());
                     for val in values {
                         println!("  {} := {}", global_details.name, val);
@@ -556,7 +554,7 @@ impl Exec for RgbArgs {
                         .map(|info| format!("{} ({})", info.id, info.ord))
                         .unwrap_or_else(|| s!("~"))
                 }
-                for details in contract.schema.owned_types.values() {
+                for details in contract.rules.schema().owned_types.values() {
                     println!("  State      \t{:78}\tWitness", "Seal");
                     println!("  {}:", details.name);
                     if let Ok(allocations) = contract.fungible(details.name.clone(), &filter) {
@@ -766,19 +764,23 @@ impl Exec for RgbArgs {
 
                 if let Ok(contract) = wallet.stock().contract_data(*contract_id) {
                     if let Some(ref assignment_name) = ass_name {
-                        let (_, details) = contract.schema.assignment(assignment_name.clone());
+                        let (_, details) =
+                            contract.rules.schema().assignment(assignment_name.clone());
                         if details.owned_state_schema.state_type() != state_type {
                             return Err(WalletError::Invoicing(s!(
                                 "invalid assignment name for state type"
                             )));
                         }
                     } else {
-                        let assignment_types =
-                            contract.schema.assignment_types_for_state(state_type);
+                        let assignment_types = contract
+                            .rules
+                            .schema()
+                            .assignment_types_for_state(state_type);
                         if assignment_types.len() == 1 {
                             ass_name = Some(
                                 contract
-                                    .schema
+                                    .rules
+                                    .schema()
                                     .assignment_name(*assignment_types[0])
                                     .clone(),
                             );
@@ -832,8 +834,18 @@ impl Exec for RgbArgs {
                 let mut wallet = self.rgb_wallet(&config)?;
                 let mut psbt_file = File::open(psbt_name)?;
                 let mut psbt = Psbt::decode(&mut psbt_file)?;
+                // the SPV proofs missing from the stash are retrieved while composing, so
+                // that the counterparty can verify the witnesses from block headers alone.
+                // Composing with no indexer configured stays possible: the consignment then
+                // carries just the proofs the stash already has
+                let spv_resolver = self.resolver_opt()?;
                 let transfer = wallet
-                    .transfer(invoice, &mut psbt, None)
+                    .transfer(
+                        invoice,
+                        &mut psbt,
+                        None,
+                        spv_resolver.as_ref().map(|r| r as &dyn ResolveSpvProof),
+                    )
                     .map_err(|err| err.to_string())?;
                 let mut psbt_file = File::create(psbt_name)?;
                 psbt.encode(psbt.version, &mut psbt_file)?;
@@ -851,8 +863,13 @@ impl Exec for RgbArgs {
                 // TODO: Support lock time and RBFs
                 let params = TransferParams::with(*fee, *sats);
 
+                let spv_resolver = self.resolver_opt()?;
                 let (mut psbt, _, transfer) = wallet
-                    .pay::<PropKey, Output>(invoice, params)
+                    .pay::<PropKey, Output>(
+                        invoice,
+                        params,
+                        spv_resolver.as_ref().map(|r| r as &dyn ResolveSpvProof),
+                    )
                     .map_err(|err| err.to_string())?;
 
                 transfer.save_file(out_file)?;
@@ -870,9 +887,9 @@ impl Exec for RgbArgs {
                 #[derive(Clone, Debug, Serialize)]
                 #[serde(crate = "serde_crate", rename_all = "camelCase")]
                 pub struct ConsignmentInspection {
-                    version: ContainerVer,
+                    version: ConsignmentVer,
                     transfer: bool,
-                    terminals: SmallOrdMap<BundleId, SecretSeals>,
+                    terminals: SmallOrdMap<BundleId, TerminalSeals>,
                 }
 
                 let content = UniversalFile::load_file(file)?;
@@ -889,19 +906,12 @@ impl Exec for RgbArgs {
                     }
                 };
                 if let Some(consignment) = consignment {
+                    // Consignments no longer embed schema/types/scripts; those
+                    // are distributed out-of-band via schema definitions.
                     let mut map = map![
                         s!("genesis.yaml") => serde_yaml::to_string(&consignment.genesis)?,
-                        s!("schema.yaml") => serde_yaml::to_string(&consignment.schema)?,
                         s!("bundles.yaml") => serde_yaml::to_string(&consignment.bundles)?,
-                        s!("types.sty") => consignment.types.to_string(),
                     ];
-                    for lib in consignment.scripts {
-                        let mut buf = Vec::new();
-                        lib.print_disassemble::<RgbIsa<MemContract>>(&mut buf)?;
-                        map.insert(format!("{}.aluasm", lib.id().to_baid64_mnemonic()), unsafe {
-                            String::from_utf8_unchecked(buf)
-                        });
-                    }
                     let contract = ConsignmentInspection {
                         version: consignment.version,
                         transfer: consignment.transfer,
@@ -1028,12 +1038,13 @@ impl Exec for RgbArgs {
                 let mut resolver = self.resolver()?;
                 let consignment = Transfer::load_file(file)?;
                 resolver.add_consignment_txes(&consignment);
+                let schema_rules = stock.schema_rules(consignment.schema_id())?;
                 let validation_config = ValidationConfig {
                     chain_net: self.chain_net(),
-                    trusted_typesystem: stock.as_stash_provider().type_system()?.clone(),
                     ..Default::default()
                 };
-                let validated_consignment = consignment.validate(&resolver, &validation_config)?;
+                let validated_consignment =
+                    consignment.validate(&schema_rules, &resolver, &validation_config)?;
                 let status = validated_consignment.validation_status();
                 if status.validity() == Validity::Valid {
                     eprintln!("The provided consignment is valid")
@@ -1047,12 +1058,12 @@ impl Exec for RgbArgs {
                 let mut resolver = self.resolver()?;
                 let transfer = Transfer::load_file(file)?;
                 resolver.add_consignment_txes(&transfer);
+                let schema_rules = stock.schema_rules(transfer.schema_id())?;
                 let validation_config = ValidationConfig {
                     chain_net: self.chain_net(),
-                    trusted_typesystem: stock.as_stash_provider().type_system()?.clone(),
                     ..Default::default()
                 };
-                let valid = transfer.validate(&resolver, &validation_config)?;
+                let valid = transfer.validate(&schema_rules, &resolver, &validation_config)?;
                 stock.accept_transfer(valid, &resolver)?;
                 eprintln!("Transfer accepted into the stash");
             }

@@ -31,6 +31,7 @@ use nonasync::persistence::PersistenceProvider;
 use psrgbt::{RgbOutExt, RgbPropKeyExt};
 use rgbstd::containers::Transfer;
 use rgbstd::contract::ContractOp;
+use rgbstd::indexers::ResolveSpvProof;
 #[cfg(feature = "fs")]
 use rgbstd::persistence::fs::FsBinStore;
 use rgbstd::persistence::{
@@ -108,9 +109,10 @@ impl<W: WalletProvider, S: StashProvider, H: StateProvider, I: IndexProvider>
         &mut self,
         invoice: &RgbInvoice,
         params: TransferParams,
+        spv_resolver: Option<&dyn ResolveSpvProof>,
     ) -> Result<(W::Psbt, PsbtMeta, Transfer), PayError> {
         self.wallet
-            .pay::<S, H, I, P, O>(&mut self.stock, invoice, params)
+            .pay::<S, H, I, P, O>(&mut self.stock, invoice, params, spv_resolver)
     }
 
     #[allow(clippy::result_large_err)]
@@ -129,8 +131,9 @@ impl<W: WalletProvider, S: StashProvider, H: StateProvider, I: IndexProvider>
         invoice: &RgbInvoice,
         psbt: &mut W::Psbt,
         beneficiary_vout: Option<u32>,
+        spv_resolver: Option<&dyn ResolveSpvProof>,
     ) -> Result<Transfer, CompletionError> {
         self.wallet
-            .transfer(&mut self.stock, invoice, psbt, beneficiary_vout)
+            .transfer(&mut self.stock, invoice, psbt, beneficiary_vout, spv_resolver)
     }
 }

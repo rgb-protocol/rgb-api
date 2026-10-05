@@ -42,13 +42,14 @@ pub use errors::{CompletionError, CompositionError, PayError, WalletError};
 pub use pay::{TransferParams, WalletProvider};
 pub use rgbstd::*;
 pub mod resolvers {
-    pub use rgbstd::indexers::AnyResolver;
     #[cfg(any(
         feature = "electrum_blocking",
         feature = "esplora_blocking",
-        feature = "mempool_blocking"
+        feature = "mempool_blocking",
+        feature = "bitcoind_blocking"
     ))]
     pub use rgbstd::indexers::*;
+    pub use rgbstd::indexers::{AnyResolver, Indexer, ResolveSpvProof};
     use rgbstd::ChainNet;
 
     use super::validation::{ResolveWitness, WitnessResolverError, WitnessStatus};

@@ -37,7 +37,7 @@ use amplify::{confinement, FromSliceError, Wrapper};
 use rgbstd::bitcoin::bip32::DerivationPath;
 use rgbstd::bitcoin::key::UntweakedPublicKey;
 use rgbstd::bitcoin::{ScriptBuf, Transaction};
-use rgbstd::containers::{Batch, Fascia, PubWitness, SealWitness};
+use rgbstd::containers::{Batch, Fascia, SealWitness};
 use rgbstd::opret::OpretProof;
 use rgbstd::rgbcore::commit_verify::mpc::{
     self, Commitment, Message, ProtocolId, MPC_MINIMAL_DEPTH,
@@ -894,8 +894,7 @@ pub trait RgbPsbtExt<P: RgbPropKeyExt, O: RgbOutExt<P>> {
                 .dbc_commit::<OpretProof>()
                 .map(|(mb, proof)| (mb, proof.into()))?,
         };
-        let witness = PubWitness::with(self.unsigned_tx());
-        let seal_witness = SealWitness::new(witness, merkle_block, dbc_proof);
+        let seal_witness = SealWitness::new(self.unsigned_tx(), merkle_block, dbc_proof, None);
         Ok(Fascia::new(seal_witness, bundles))
     }
 

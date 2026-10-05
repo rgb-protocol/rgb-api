@@ -27,6 +27,7 @@ use chrono::Utc;
 use psrgbt::{RgbOutExt, RgbPropKeyExt, RgbPsbtExt, TapretKeyError, Terminal};
 use rgbstd::containers::{Batch, BuilderSeal, Transfer};
 use rgbstd::contract::{AllocatedState, AssignmentsFilter, BuilderError};
+use rgbstd::indexers::ResolveSpvProof;
 use rgbstd::invoice::{Amount, Beneficiary, InvoiceState, RgbInvoice};
 use rgbstd::persistence::{IndexProvider, StashInconsistency, StashProvider, StateProvider, Stock};
 use rgbstd::rgbcore::dbc::tapret::{TapretCommitment, TapretProof};
@@ -133,7 +134,7 @@ fn validate_contract_and_invoice<S: StashProvider, H: StateProvider, I: IndexPro
         .map_err(|e| e.to_string())?;
 
     if let Some(invoice_schema) = invoice.schema {
-        if invoice_schema != contract.schema.schema_id() {
+        if invoice_schema != contract.rules.schema_id() {
             return Err(CompositionError::InvalidSchema);
         }
     }
@@ -164,18 +165,20 @@ fn validate_contract_and_invoice<S: StashProvider, H: StateProvider, I: IndexPro
     let invoice_assignment_type = invoice
         .assignment_name
         .as_ref()
-        .map(|n| contract.schema.assignment_type(n.clone()));
+        .map(|n| contract.rules.schema().assignment_type(n.clone()));
     let assignment_type = invoice_assignment_type
         .as_ref()
         .or_else(|| {
             let assignment_types = contract
-                .schema
+                .rules
+                .schema()
                 .assignment_types_for_state(assignment_state.clone().into());
             if assignment_types.len() == 1 {
                 Some(assignment_types[0])
             } else {
                 contract
-                    .schema
+                    .rules
+                    .schema()
                     .default_assignment
                     .as_ref()
                     .filter(|&assignment| assignment_types.contains(&assignment))
@@ -183,7 +186,8 @@ fn validate_contract_and_invoice<S: StashProvider, H: StateProvider, I: IndexPro
         })
         .ok_or(CompositionError::NoAssignmentType)?;
     let transition_type = contract
-        .schema
+        .rules
+        .schema()
         .default_transition_for_assignment(assignment_type);
 
     Ok(PaymentContext {
@@ -487,13 +491,15 @@ pub trait WalletProvider {
         stock: &mut Stock<S, H, I>,
         invoice: &RgbInvoice,
         params: TransferParams,
+        spv_resolver: Option<&dyn ResolveSpvProof>,
     ) -> Result<(Self::Psbt, PsbtMeta, Transfer), PayError> {
         let (mut psbt, meta) = self.construct_psbt_rgb::<S, H, I, P, O>(stock, invoice, params)?;
         // ... here we pass PSBT around signers, if necessary
-        let transfer = match self.transfer(stock, invoice, &mut psbt, meta.beneficiary_vout) {
-            Ok(transfer) => transfer,
-            Err(e) => return Err(PayError::Completion(e)),
-        };
+        let transfer =
+            match self.transfer(stock, invoice, &mut psbt, meta.beneficiary_vout, spv_resolver) {
+                Ok(transfer) => transfer,
+                Err(e) => return Err(PayError::Completion(e)),
+            };
         Ok((psbt, meta, transfer))
     }
 
@@ -564,6 +570,7 @@ pub trait WalletProvider {
         invoice: &RgbInvoice,
         psbt: &mut Self::Psbt,
         beneficiary_vout: Option<u32>,
+        spv_resolver: Option<&dyn ResolveSpvProof>,
     ) -> Result<Transfer, CompletionError> {
         let contract_id = invoice.contract.ok_or(CompletionError::NoContract)?;
 
@@ -605,7 +612,7 @@ pub trait WalletProvider {
             .consume_fascia(fascia, FasciaResolver { witness_id })
             .map_err(|e| e.to_string())?;
         let transfer = stock
-            .transfer(contract_id, beneficiary2, beneficiary1, [], Some(witness_id))
+            .transfer(contract_id, beneficiary2, beneficiary1, [], Some(witness_id), spv_resolver)
             .map_err(|e| e.to_string())?;
 
         Ok(transfer)

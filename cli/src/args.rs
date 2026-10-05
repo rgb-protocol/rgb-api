@@ -195,6 +195,21 @@ impl RgbArgs {
         Ok(resolver)
     }
 
+    /// The configured resolver, or `None` when no indexer was specified at all.
+    ///
+    /// For commands which can do without one: unlike [`Self::resolver`] an absent indexer
+    /// is not an error, while one which is misconfigured (ambiguous, or serving another
+    /// chain) still is.
+    pub fn resolver_opt(&self) -> Result<Option<AnyResolver>, WalletError> {
+        if self.resolver.esplora.is_none()
+            && self.resolver.electrum.is_none()
+            && self.resolver.mempool.is_none()
+        {
+            return Ok(None);
+        }
+        self.resolver().map(Some)
+    }
+
     pub fn chain_net(&self) -> ChainNet {
         match self.general.network {
             Network::Mainnet => ChainNet::BitcoinMainnet,
