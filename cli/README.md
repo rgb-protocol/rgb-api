@@ -1,5 +1,10 @@
 # RGB Command Line Interface
 
+> [!WARNING]
+> This CLI is meant for testing and development purposes only: it is not a
+> production-ready wallet and must not be used to hold or transfer assets of
+> real value.
+
 ## Install
 
 ### Requirements
@@ -69,7 +74,7 @@ Currently, the only supported configuration key is `default_wallet`, and the def
 Here is the command line help:
 
 ```
-Command-line wallet for RGB smart contracts on Bitcoin
+Command-line wallet for RGB smart contracts on Bitcoin, for testing purposes only
 
 Usage: rgb [OPTIONS] <COMMAND>
 

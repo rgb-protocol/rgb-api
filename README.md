@@ -19,7 +19,9 @@ form of trustless distributed computing which does not require introduction of
 This repository provides client-facing library which can be used by desktop
 apps and mobile wallets for integrating RGB support. It also provides binary
 `rgb` which runs in the command-line and exposes all RGB functionality locally,
-requiring only an indexer, check [here](/cli/README.md) for details.
+requiring only an indexer, check [here](/cli/README.md) for details. The `rgb`
+binary is meant for testing and development purposes only and must not be used
+as a production wallet.
 
 ## License
 

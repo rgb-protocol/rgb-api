@@ -1,7 +1,7 @@
 [package]
 name = "rgb-cmd"
 version = { workspace = true }
-description = "Command-line wallet for RGB smart contracts on Bitcoin"
+description = "Command-line wallet for RGB smart contracts on Bitcoin, for testing purposes only"
 keywords = { workspace = true }
 categories = { workspace = true }
 authors = { workspace = true }
