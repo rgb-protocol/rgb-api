@@ -40,7 +40,9 @@ use rgb::indexers::ResolveSpvProof;
 use rgb::invoice::{Beneficiary, Pay2Vout, RgbInvoice, RgbInvoiceBuilder, XChainNet};
 use rgb::resolvers::ContractIssueResolver;
 use rgb::schema::SchemaId;
-use rgb::validation::{ValidationConfig, Validity};
+use rgb::validation::{
+    Failure, ResolveWitness, ValidationConfig, ValidationError, Validity, WitnessStatus,
+};
 use rgb::vm::WitnessOrd;
 use rgb::{
     Allocation, BundleId, ContractId, GenesisSeal, GraphSeal, Identity, OpId, Outpoint, OutputSeal,
@@ -279,7 +281,8 @@ pub enum Command {
     /// Validate transfer consignment & accept to the store
     #[display("accept")]
     Accept {
-        /// Force accepting consignments with non-mined terminal witness
+        /// Accept the transfer even if some of its witness transactions are unknown to the
+        /// indexer (e.g. not broadcast yet), taking them from the consignment
         #[arg(short, long)]
         force: bool,
 
@@ -938,6 +941,19 @@ impl Exec for RgbArgs {
                 let stock = self.rgb_stock()?;
                 let mut resolver = self.resolver()?;
                 let consignment = Transfer::load_file(file)?;
+                // the consignment is normally validated before its witness TXs get broadcast,
+                // so the ones the indexer doesn't know are taken from the consignment, but
+                // reported, since the transfer is valid only once they get broadcast and mined
+                let mut unknown_witnesses = vec![];
+                for witness_id in consignment.bundles.iter().map(|bw| bw.witness_id()) {
+                    match resolver
+                        .resolve_witness(witness_id)
+                        .map_err(|e| WalletError::Resolver(e.to_string()))?
+                    {
+                        WitnessStatus::Resolved(_, ord) if ord != WitnessOrd::Archived => {}
+                        _ => unknown_witnesses.push(witness_id),
+                    }
+                }
                 resolver.add_consignment_txes(&consignment);
                 let schema_rules = stock.schema_rules(consignment.schema_id())?;
                 let validation_config = ValidationConfig {
@@ -952,19 +968,41 @@ impl Exec for RgbArgs {
                 } else {
                     eprintln!("{status}");
                 }
+                if !unknown_witnesses.is_empty() {
+                    eprintln!(
+                        "Warning: these witness transactions are unknown to the indexer and were \
+                         taken from the consignment, which is valid only once they get broadcast \
+                         and mined:"
+                    );
+                    for witness_id in unknown_witnesses {
+                        eprintln!("- {witness_id}");
+                    }
+                }
             }
-            Command::Accept { force: _, file } => {
-                // TODO: Ensure we properly handle unmined terminal transactions
+            Command::Accept { force, file } => {
                 let mut stock = self.rgb_stock()?;
                 let mut resolver = self.resolver()?;
                 let transfer = Transfer::load_file(file)?;
-                resolver.add_consignment_txes(&transfer);
+                if *force {
+                    resolver.add_consignment_txes(&transfer);
+                }
                 let schema_rules = stock.schema_rules(transfer.schema_id())?;
                 let validation_config = ValidationConfig {
                     chain_net: self.chain_net(),
                     ..Default::default()
                 };
-                let valid = transfer.validate(&schema_rules, &resolver, &validation_config)?;
+                let valid = transfer
+                    .validate(&schema_rules, &resolver, &validation_config)
+                    .map_err(|err| match err {
+                        ValidationError::InvalidConsignment(Failure::SealNoPubWitness(
+                            _,
+                            witness_id,
+                        )) => WalletError::Resolver(format!(
+                            "witness transaction {witness_id} is unknown to the indexer; if it is \
+                             not broadcast yet, use --force to take it from the consignment"
+                        )),
+                        err => err.into(),
+                    })?;
                 stock.accept_transfer(valid, &resolver)?;
                 eprintln!("Transfer accepted into the store");
             }

@@ -417,14 +417,12 @@ as the operation being performed or the assignment associated with the transacti
 $ rgb --esplora=https://blockstream.info/testnet/api/ validate demo.rgb
 ```
 
-Example output:
+Example output, when validating before the sender has broadcast the witness transaction:
 
 ```shell
-Consignment has non-mined terminal(s)
-Non-mined terminals:
+The provided consignment is valid
+Warning: these witness transactions are unknown to the indexer and were taken from the consignment, which is valid only once they get broadcast and mined:
 - f17d544c0ac161f758d379c4366e6ede8f394da9633671908738b415ae5c8fb4
-Validation warnings:
-- terminal witness transaction f17d544c0ac161f758d379c4366e6ede8f394da9633671908738b415ae5c8fb4 is not yet mined.
 ```
 
 ### Sign and broadcast the transaction
@@ -446,5 +444,8 @@ Now you can use bdk-cli or any other wallet to sign and broadcast the transactio
 As receiver:
 
 ```shell
-$ rgb accept -f <FILE>
+$ rgb accept <FILE>
 ```
+
+The witness transactions must be known to the indexer. `--force` accepts the transfer even if some of them are not,
+taking them from the consignment: use it only if you trust the sender to broadcast them.
