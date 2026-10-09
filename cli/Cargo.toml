@@ -28,7 +28,7 @@ rgb-ops = { workspace = true, features = [
     "serde",
     "sqlite",
 ] }
-rgb-api = { version = "0.11.1", path = "..", features = [
+rgb-api = { version = "0.11.2-rc.1", path = "..", features = [
     "cli",
     "electrum_blocking",
     "esplora_blocking",
