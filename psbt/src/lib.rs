@@ -1084,7 +1084,8 @@ pub trait RgbPsbtExt<P: RgbPropKeyExt, O: RgbOutExt<P>> {
             let input_map = NonEmptyOrdMap::try_from(contract_consumers)
                 .map_err(|_| RgbPsbtError::InvalidInputsNumber(inputs_len))?;
             let mut transitions_map: HashMap<OpId, Transition> = HashMap::new();
-            for opid in input_map.values() {
+            // a transition spends many inputs: decode each of them once
+            for opid in input_map.values().collect::<BTreeSet<_>>() {
                 if let Some(transition) = self.rgb_transition(*opid)? {
                     transitions_map.insert(*opid, transition);
                 }
