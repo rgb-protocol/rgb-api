@@ -28,7 +28,7 @@ mod bp;
 pub mod bp_conversion_utils;
 mod rb;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet};
 use std::str::FromStr;
 
 use amplify::confinement::{Confined, NonEmptyOrdMap, SmallVec, U16, U24, U32};
@@ -871,9 +871,7 @@ pub trait RgbPsbtExt<P: RgbPropKeyExt, O: RgbOutExt<P>> {
     fn set_tapret_commitment(&mut self, idx: usize);
 
     fn rgb_embed(&mut self, batch: Batch) -> Result<(), EmbedError> {
-        for transition in batch {
-            self.push_rgb_transition(transition)?;
-        }
+        self.push_rgb_transitions(batch)?;
         Ok(())
     }
 
@@ -985,28 +983,94 @@ pub trait RgbPsbtExt<P: RgbPropKeyExt, O: RgbOutExt<P>> {
         Ok(true)
     }
 
-    fn push_rgb_transition(&mut self, mut transition: Transition) -> Result<bool, RgbPsbtError> {
-        let opid = transition.id();
+    /// Adds a state transition and registers it as the consumer of all its inputs.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(true)`, if the transition wasn't already present in the PSBT.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Self::push_rgb_transitions`]; on error the PSBT is left unchanged.
+    fn push_rgb_transition(&mut self, transition: Transition) -> Result<bool, RgbPsbtError> {
+        Ok(self.push_rgb_transitions([transition])? == 1)
+    }
 
-        let prev_transition = self.rgb_transition(opid)?;
-        if let Some(ref prev_transition) = prev_transition {
-            transition.merge_reveal(prev_transition).map_err(|err| {
-                RgbPsbtError::UnrelatedTransitions(prev_transition.id(), opid, err)
-            })?;
+    /// Adds state transitions, registering each of them as the consumer of all its inputs, as
+    /// [`Self::push_rgb_transition`] would do one by one, but reading and writing the consumers
+    /// of each contract once.
+    ///
+    /// # Returns
+    ///
+    /// The number of transitions which weren't already present in the PSBT, counting a
+    /// transition repeated in `transitions` once.
+    ///
+    /// # Errors
+    ///
+    /// If a transition can't be merged with the one with the same ID already present, if it's
+    /// too big, or if any of its [`Opout`]s is already spent by a different [`OpId`], in the
+    /// PSBT or in `transitions`. In that case the PSBT is left unchanged.
+    fn push_rgb_transitions(
+        &mut self,
+        transitions: impl IntoIterator<Item = Transition>,
+    ) -> Result<usize, RgbPsbtError> {
+        // check everything in memory before writing, so that on error nothing is added
+        let mut known_transitions: HashMap<OpId, Transition> = HashMap::new();
+        let mut new_transitions: Vec<(OpId, Vec<u8>)> = Vec::new();
+        let mut consumers: BTreeMap<ContractId, OpoutAndOpids> = BTreeMap::new();
+        for mut transition in transitions {
+            let opid = transition.id();
+
+            // decode each transition already present once
+            if let hash_map::Entry::Vacant(entry) = known_transitions.entry(opid) {
+                if let Some(prev_transition) = self.rgb_transition(opid)? {
+                    entry.insert(prev_transition);
+                }
+            }
+            let prev_transition = known_transitions.get(&opid);
+            if let Some(prev_transition) = prev_transition {
+                transition.merge_reveal(prev_transition).map_err(|err| {
+                    RgbPsbtError::UnrelatedTransitions(prev_transition.id(), opid, err)
+                })?;
+            }
+            let serialized_transition = transition
+                .to_strict_serialized::<U24>()
+                .map_err(|_| RgbPsbtError::TransitionTooBig(opid))?;
+
+            let contract_consumers = match consumers.entry(transition.contract_id) {
+                btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                btree_map::Entry::Vacant(entry) => {
+                    let key = P::rgb_consumed_by(transition.contract_id);
+                    entry.insert(match self.proprietary_get(&key) {
+                        Some(existing_data) => OpoutAndOpids::deserialize(existing_data)?,
+                        None => OpoutAndOpids::new(bmap![]),
+                    })
+                }
+            };
+            for opout in transition.inputs() {
+                if *contract_consumers.entry(opout).or_insert(opid) != opid {
+                    return Err(RgbPsbtError::DoubleSpend);
+                }
+            }
+
+            // a transition already present is kept: the merge above only checks they're related
+            if prev_transition.is_none() {
+                new_transitions.push((opid, serialized_transition.release()));
+                known_transitions.insert(opid, transition);
+            }
         }
-        let serialized_transition = transition
-            .to_strict_serialized::<U24>()
-            .map_err(|_| RgbPsbtError::TransitionTooBig(opid))?;
 
-        // Since we update transition it's ok to ignore the fact that it previously
-        // existed
-        let _ = self.proprietary_push(P::rgb_transition(opid), serialized_transition.release());
-
-        for opout in transition.inputs() {
-            self.set_rgb_contract_consumer(transition.contract_id, opout, opid)?;
+        let added = new_transitions.len();
+        for (opid, serialized_transition) in new_transitions {
+            self.proprietary_insert(P::rgb_transition(opid), serialized_transition);
         }
-
-        Ok(prev_transition.is_none())
+        for (contract_id, contract_consumers) in consumers {
+            self.proprietary_insert(
+                P::rgb_consumed_by(contract_id),
+                contract_consumers.serialize(),
+            );
+        }
+        Ok(added)
     }
 
     fn rgb_bundles(&self) -> Result<BTreeMap<ContractId, TransitionBundle>, RgbPsbtError> {
@@ -1089,4 +1153,132 @@ pub trait RgbPsbtExt<P: RgbPropKeyExt, O: RgbOutExt<P>> {
     fn proprietary_get_value(&self, key: &P) -> Option<&[u8]>;
 
     fn proprietary_get(&self, key: &P) -> Option<&[u8]> { self.proprietary_get_value(key) }
+}
+
+#[cfg(all(test, feature = "bp"))]
+mod test {
+    use amplify::confinement::NonEmptyOrdSet;
+    use amplify::ByteArray;
+    use bpstd::psbt::Psbt;
+    use rgbstd::AssignmentType;
+    use strict_encoding::StrictDumb;
+
+    use super::*;
+
+    fn opout(no: u16) -> Opout {
+        Opout::new(OpId::from_byte_array([1; 32]), AssignmentType::with(1), no)
+    }
+
+    fn transition(nonce: u64, inputs: impl IntoIterator<Item = Opout>) -> Transition {
+        let mut transition = Transition::strict_dumb();
+        transition.nonce = nonce;
+        transition.inputs = NonEmptyOrdSet::from_iter_checked(inputs).into();
+        transition
+    }
+
+    #[test]
+    fn push_rgb_transition_sets_all_consumers() {
+        let mut psbt = Psbt::default();
+        let transition = transition(0, (0..1000).map(opout));
+        let contract_id = transition.contract_id;
+        let opid = transition.id();
+        assert!(psbt.push_rgb_transition(transition.clone()).unwrap());
+        // pushing it again is a no-op on the consumers
+        assert!(!psbt.push_rgb_transition(transition).unwrap());
+
+        let consumers = psbt.rgb_contract_consumers(contract_id).unwrap();
+        assert_eq!(consumers, (0..1000).map(|no| (opout(no), opid)).collect());
+    }
+
+    #[test]
+    fn push_rgb_transition_double_spend_adds_no_consumer() {
+        let mut psbt = Psbt::default();
+        let first = transition(0, [opout(1), opout(2)]);
+        let contract_id = first.contract_id;
+        psbt.push_rgb_transition(first).unwrap();
+        let consumers = psbt.rgb_contract_consumers(contract_id).unwrap();
+
+        // opout 0 sorts before the double-spent opout 2
+        let res = psbt.push_rgb_transition(transition(1, [opout(0), opout(2)]));
+        assert!(matches!(res, Err(RgbPsbtError::DoubleSpend)));
+        assert_eq!(psbt.rgb_contract_consumers(contract_id).unwrap(), consumers);
+    }
+
+    #[test]
+    fn push_rgb_transitions_matches_one_by_one() {
+        let transitions: Vec<_> = (0..1000)
+            .map(|no| transition(no as u64, [opout(no)]))
+            .collect();
+        let contract_id = transitions[0].contract_id;
+        let expected_consumers: BTreeMap<_, _> = transitions
+            .iter()
+            .map(|transition| (transition.inputs().into_iter().next().unwrap(), transition.id()))
+            .collect();
+
+        let mut psbt = Psbt::default();
+        assert_eq!(psbt.push_rgb_transitions(transitions.clone()).unwrap(), 1000);
+        assert_eq!(psbt.rgb_contract_consumers(contract_id).unwrap(), expected_consumers);
+
+        let mut one_by_one = Psbt::default();
+        for transition in transitions {
+            assert!(one_by_one.push_rgb_transition(transition).unwrap());
+        }
+        assert_eq!(psbt, one_by_one);
+    }
+
+    #[test]
+    fn push_rgb_transitions_merges_present_transitions() {
+        let mut psbt = Psbt::default();
+        let present = transition(0, [opout(0), opout(1)]);
+        let new = transition(1, [opout(2)]);
+        let contract_id = present.contract_id;
+        psbt.push_rgb_transition(present.clone()).unwrap();
+
+        // the present transition and the repeated new one are counted once
+        let added = psbt
+            .push_rgb_transitions([present.clone(), new.clone(), new.clone()])
+            .unwrap();
+        assert_eq!(added, 1);
+        assert_eq!(psbt.rgb_transition(present.id()).unwrap(), Some(present.clone()));
+        assert_eq!(psbt.rgb_transition(new.id()).unwrap(), Some(new.clone()));
+        assert_eq!(
+            psbt.rgb_contract_consumers(contract_id).unwrap(),
+            bmap![opout(0) => present.id(), opout(1) => present.id(), opout(2) => new.id()]
+        );
+    }
+
+    #[test]
+    fn push_rgb_transitions_double_spend_on_psbt_changes_nothing() {
+        let mut psbt = Psbt::default();
+        psbt.push_rgb_transition(transition(0, [opout(1), opout(2)]))
+            .unwrap();
+        let before = psbt.clone();
+
+        let res = psbt
+            .push_rgb_transitions([transition(1, [opout(3)]), transition(2, [opout(0), opout(2)])]);
+        assert!(matches!(res, Err(RgbPsbtError::DoubleSpend)));
+        assert_eq!(psbt, before);
+    }
+
+    #[test]
+    fn push_rgb_transitions_double_spend_in_batch_changes_nothing() {
+        let mut psbt = Psbt::default();
+        psbt.push_rgb_transition(transition(0, [opout(1)])).unwrap();
+        let before = psbt.clone();
+
+        let res = psbt
+            .push_rgb_transitions([transition(1, [opout(2), opout(3)]), transition(2, [opout(3)])]);
+        assert!(matches!(res, Err(RgbPsbtError::DoubleSpend)));
+        assert_eq!(psbt, before);
+    }
+
+    #[test]
+    fn push_rgb_transitions_empty_is_noop() {
+        let mut psbt = Psbt::default();
+        psbt.push_rgb_transition(transition(0, [opout(0)])).unwrap();
+        let before = psbt.clone();
+
+        assert_eq!(psbt.push_rgb_transitions([]).unwrap(), 0);
+        assert_eq!(psbt, before);
+    }
 }
