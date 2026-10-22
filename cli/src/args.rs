@@ -158,13 +158,24 @@ impl RgbArgs {
     }
 
     pub fn resolver(&self) -> Result<AnyResolver, WalletError> {
+        // The default esplora and mempool URLs contain a `{network}` placeholder, which
+        // bp-wallet's `Args::indexer` replaces; do the same here.
+        let network = self.general.network.to_string();
         let resolver =
             match (&self.resolver.esplora, &self.resolver.electrum, &self.resolver.mempool) {
                 (None, Some(url), None) => AnyResolver::electrum_blocking(url, None),
                 (Some(url), None, None) => AnyResolver::esplora_blocking(
-                    esplora_blocking::esplora_client::Builder::new(url),
+                    esplora_blocking::esplora_client::Builder::new(
+                        &url.replace("{network}", &network),
+                    ),
                 ),
-                (None, None, Some(url)) => AnyResolver::mempool_blocking(url, None),
+                (None, None, Some(url)) => {
+                    let url = url.replace("{network}", &network);
+                    AnyResolver::mempool_blocking(
+                        &url,
+                        Some(esplora_blocking::esplora_client::Builder::new(&url)),
+                    )
+                }
                 _ => Err(s!(" - error: no transaction resolver is specified; use either \
                              --esplora --mempool or --electrum argument")),
             }
