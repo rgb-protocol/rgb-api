@@ -24,7 +24,7 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use amplify::confinement::{SmallOrdMap, U16 as MAX16};
+use amplify::confinement::U16 as MAX16;
 use bpwallet::cli::{BpCommand, Config, Exec};
 use bpwallet::psbt::{Output, PropKey, Psbt, PsbtConstructor, PsbtVer};
 use bpwallet::{Derive, Sats};
@@ -33,8 +33,8 @@ use psrgbt::bp_conversion_utils::{
     outpoint_bp_to_bitcoin,
 };
 use rgb::containers::{
-    BuilderSeal, ConsignmentExt, ConsignmentVer, FileContent, TerminalSeals, Transfer,
-    UncheckedContract, UncheckedTransfer, UniversalFile,
+    BuilderSeal, ConsignmentExt, ConsignmentVer, FileContent, Transfer, UncheckedContract,
+    UncheckedTransfer, UniversalFile,
 };
 use rgb::indexers::ResolveSpvProof;
 use rgb::invoice::{Beneficiary, Pay2Vout, RgbInvoice, RgbInvoiceBuilder, XChainNet};
@@ -45,7 +45,7 @@ use rgb::validation::{
 };
 use rgb::vm::WitnessOrd;
 use rgb::{
-    Allocation, BundleId, ContractId, GenesisSeal, GraphSeal, Identity, OpId, Outpoint, OutputSeal,
+    Allocation, ContractId, GenesisSeal, GraphSeal, Identity, OpId, Outpoint, OutputSeal,
     OwnedFraction, SqliteRgbWallet, StateType, TokenIndex, TransferParams, Txid, WalletError,
     WalletProvider,
 };
@@ -869,7 +869,6 @@ impl Exec for RgbArgs {
                 pub struct ConsignmentInspection {
                     version: ConsignmentVer,
                     transfer: bool,
-                    terminals: SmallOrdMap<BundleId, TerminalSeals>,
                 }
 
                 let content = UniversalFile::load_file(file)?;
@@ -895,7 +894,6 @@ impl Exec for RgbArgs {
                     let contract = ConsignmentInspection {
                         version: consignment.version,
                         transfer: consignment.transfer,
-                        terminals: consignment.terminals,
                     };
                     map.insert(s!("consignment-meta.yaml"), serde_yaml::to_string(&contract)?);
                     let path = path.as_ref().expect("required by clap");
