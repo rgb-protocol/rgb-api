@@ -38,8 +38,8 @@ use rgbstd::rgbcore::seals::txout::{CloseMethod, ExplicitSeal};
 use rgbstd::rgbcore::secp256k1::rand;
 use rgbstd::validation::WitnessOrdProvider;
 use rgbstd::{
-    AssignmentType, ContractId, GraphSeal, Outpoint, OutputSeal, RevealedData, RevealedValue,
-    Transition, TransitionType, Txid, VoidState,
+    AssignmentType, ContractId, GraphSeal, Opout, Outpoint, OutputSeal, RevealedData,
+    RevealedValue, Transition, TransitionType, Txid, VoidState,
 };
 
 use crate::filters::{Filter, WalletFilter};
@@ -95,6 +95,9 @@ struct PaymentContext {
     assignment_type: AssignmentType,
     transition_type: TransitionType,
 }
+
+/// State of the paid contract which the main transition can't move
+type LeftoverState = (Opout, AllocatedState, TransitionType);
 
 #[allow(clippy::result_large_err)]
 fn validate_contract_and_invoice<S: RgbStore>(
@@ -238,12 +241,14 @@ fn select_state_for_invoice<S: RgbStore>(
                 .map(|a| a.seal)
                 .collect::<BTreeSet<_>>()
         }
+        // a void invoice asks for a single right, so only one is paid with
         InvoiceState::Void => stock
             .allocations::<VoidState>(context.contract_id, scope(AllocKind::Declarative))
             .map_err(|e| e.to_string())?
             .into_iter()
             .filter(|a| filter.should_include(a.seal, a.witness))
             .map(|a| a.seal)
+            .take(1)
             .collect::<BTreeSet<_>>(),
     };
 
@@ -257,7 +262,7 @@ fn build_main_transition<S: RgbStore>(
     context: &PaymentContext,
     prev_outputs: &BTreeSet<OutputSeal>,
     meta: &PsbtMeta,
-) -> Result<Transition, CompositionError> {
+) -> Result<(Transition, Vec<LeftoverState>), CompositionError> {
     let Some(ref assignment_state) = invoice.assignment_state else {
         return Err(CompositionError::NoAssignmentState);
     };
@@ -280,13 +285,38 @@ fn build_main_transition<S: RgbStore>(
         .transition_builder_raw(context.contract_id, context.transition_type)
         .map_err(|e| e.to_string())?;
 
+    let schema = stock
+        .as_store()
+        .contract_schema(context.contract_id)
+        .map_err(|e| e.to_string())?
+        .ok_or(BuilderError::Inconsistency(Inconsistency::ContractAbsent(context.contract_id)))?;
+
     let mut sum_inputs = Amount::ZERO;
     let mut data_inputs = vec![];
+    let mut leftovers = vec![];
+    let mut right_paid = false;
     for (_output, list) in stock
         .contract_assignments_for(context.contract_id, prev_outputs.iter().copied())
         .map_err(|e| e.to_string())?
     {
         for (opout, state) in list {
+            // only one right is paid, any other of the same type on the seal is moved to change
+            if matches!(assignment_state, InvoiceState::Void) && opout.ty == context.assignment_type
+            {
+                if right_paid {
+                    leftovers.push((opout, state, context.transition_type));
+                    continue;
+                }
+                right_paid = true;
+            }
+            // state which the main transition can't carry is left to an extra transition
+            if opout.ty != context.assignment_type {
+                let transition_type = schema.default_transition_for_assignment(&opout.ty);
+                if transition_type != context.transition_type {
+                    leftovers.push((opout, state, transition_type));
+                    continue;
+                }
+            }
             main_builder = main_builder.add_input(opout, state.clone())?;
             if opout.ty != context.assignment_type {
                 let seal = create_change_output_seal(opout.ty, meta)?;
@@ -349,7 +379,7 @@ fn build_main_transition<S: RgbStore>(
     }
 
     let transition = main_builder.complete_transition()?;
-    Ok(transition)
+    Ok((transition, leftovers))
 }
 
 #[allow(clippy::result_large_err)]
@@ -365,9 +395,29 @@ fn create_change_output_seal(
 }
 
 #[allow(clippy::result_large_err)]
+fn build_extra_transition<S: RgbStore>(
+    stock: &Stock<S>,
+    contract_id: ContractId,
+    transition_type: TransitionType,
+    opout: Opout,
+    state: AllocatedState,
+    meta: &PsbtMeta,
+) -> Result<Transition, CompositionError> {
+    let seal = create_change_output_seal(opout.ty, meta)?;
+    let transition = stock
+        .transition_builder_raw(contract_id, transition_type)
+        .map_err(|e| e.to_string())?
+        .add_input(opout, state.clone())?
+        .add_owned_state_raw(opout.ty, seal, state)?
+        .complete_transition()?;
+    Ok(transition)
+}
+
+#[allow(clippy::result_large_err)]
 fn build_extra_transitions<S: RgbStore>(
     stock: &Stock<S>,
     contract_id: ContractId,
+    leftovers: Vec<LeftoverState>,
     prev_outputs: &BTreeSet<OutputSeal>,
     meta: &PsbtMeta,
 ) -> Result<Confined<Vec<Transition>, 0, { U24 - 1 }>, CompositionError> {
@@ -383,32 +433,31 @@ fn build_extra_transitions<S: RgbStore>(
     // Skip current contract
     extra_state.remove(&contract_id);
 
+    let mut extras =
+        Confined::<Vec<_>, 0, { U24 - 1 }>::with_capacity(leftovers.len() + extra_state.len());
+
+    // Construct transitions for the paid contract's state left out of the main transition
+    for (opout, state, transition_type) in leftovers {
+        let transition =
+            build_extra_transition(stock, contract_id, transition_type, opout, state, meta)?;
+        extras
+            .push(transition)
+            .map_err(|_| CompositionError::TooManyExtras)?;
+    }
+
     // Construct transitions for extra state
-    let mut extras = Confined::<Vec<_>, 0, { U24 - 1 }>::with_capacity(extra_state.len());
     for (id, seal_map) in extra_state {
         let schema = stock
             .as_store()
             .contract_schema(id)
-            .map_err(|_| BuilderError::Inconsistency(Inconsistency::ContractAbsent(id)))?
+            .map_err(|e| e.to_string())?
             .ok_or(BuilderError::Inconsistency(Inconsistency::ContractAbsent(id)))?;
 
         for (_output, assigns) in seal_map {
             for (opout, state) in assigns {
                 let transition_type = schema.default_transition_for_assignment(&opout.ty);
-
-                let mut extra_builder = stock
-                    .transition_builder_raw(id, transition_type)
-                    .map_err(|e| e.to_string())?;
-
-                let seal = create_change_output_seal(opout.ty, meta)?;
-                extra_builder = extra_builder
-                    .add_input(opout, state.clone())?
-                    .add_owned_state_raw(opout.ty, seal, state)?;
-
-                if !extra_builder.has_inputs() {
-                    continue;
-                }
-                let transition = extra_builder.complete_transition()?;
+                let transition =
+                    build_extra_transition(stock, id, transition_type, opout, state, meta)?;
                 extras
                     .push(transition)
                     .map_err(|_| CompositionError::TooManyExtras)?;
@@ -510,10 +559,12 @@ pub trait WalletProvider {
         let (mut psbt, meta) = self.create_psbt(invoice, close_method, prev_outpoints, params)?;
 
         // 3. Build main transition
-        let main = build_main_transition(stock, invoice, &context, &prev_outputs, &meta)?;
+        let (main, leftovers) =
+            build_main_transition(stock, invoice, &context, &prev_outputs, &meta)?;
 
-        // 4. Build extra transitions for other contracts
-        let extras = build_extra_transitions(stock, context.contract_id, &prev_outputs, &meta)?;
+        // 4. Build extra transitions for the state the main one can't move, and for other contracts
+        let extras =
+            build_extra_transitions(stock, context.contract_id, leftovers, &prev_outputs, &meta)?;
 
         let mut batch = Batch { main, extras };
         batch.set_priority(u64::MAX);
