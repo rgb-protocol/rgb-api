@@ -16,7 +16,11 @@ const REGTEST_GENESIS_HASH: &str =
 
 /// Spawns an Esplora server serving the regtest chain without any transaction, so that it
 /// answers every witness lookup with "not found", as it would for a TX never broadcast.
-fn esplora_without_txs() -> String {
+fn esplora_without_txs() -> String { esplora_without_txs_at("") }
+
+/// Like [`esplora_without_txs`], with the API served under `prefix` (e.g. `/regtest`).
+fn esplora_without_txs_at(prefix: &str) -> String {
+    let genesis_request = format!("GET {prefix}/block-height/0 ");
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock Esplora server");
     let address = listener.local_addr().expect("read mock server address");
     thread::spawn(move || {
@@ -26,7 +30,7 @@ fn esplora_without_txs() -> String {
             BufReader::new(&stream)
                 .read_line(&mut request_line)
                 .expect("read Esplora request");
-            let (status, body) = if request_line.starts_with("GET /block-height/0 ") {
+            let (status, body) = if request_line.starts_with(&genesis_request) {
                 ("200 OK", REGTEST_GENESIS_HASH)
             } else {
                 ("404 Not Found", "")
@@ -96,4 +100,28 @@ fn validate_warns_about_witness_unknown_to_indexer() {
         .success()
         .stderr(predicate::str::contains("The provided consignment is valid"))
         .stderr(predicate::str::contains("unknown to the indexer"));
+}
+
+#[test]
+fn esplora_url_network_placeholder_is_substituted() {
+    let data_dir = data_dir_with_nia_schema();
+    rgb(data_dir.path())
+        .arg(format!("--esplora={}/{{network}}", esplora_without_txs_at("/regtest")))
+        .arg("validate")
+        .arg(Path::new(FIXTURES).join(NIA_TRANSFER))
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("The provided consignment is valid"));
+}
+
+#[test]
+fn mempool_resolver_does_not_panic() {
+    let data_dir = data_dir_with_nia_schema();
+    rgb(data_dir.path())
+        .arg(format!("--mempool={}/{{network}}", esplora_without_txs_at("/regtest")))
+        .arg("validate")
+        .arg(Path::new(FIXTURES).join(NIA_TRANSFER))
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("The provided consignment is valid"));
 }
