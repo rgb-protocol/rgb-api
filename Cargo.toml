@@ -27,10 +27,10 @@ nonasync = { version = "=0.1.3", features = [
     "log",
 ] }
 baid64 = "=0.4.1"
-rgb-strict-encoding = "1.0.5"
-rgb-strict-types = "1.0.5"
+rgb-strict-encoding = "1.0.6"
+rgb-strict-types = "1.0.6"
 bp-wallet = { version = "0.11.1-alpha.2" }
-rgb-ops = { version = "0.11.2-rc.1" }
+rgb-ops = { version = "0.11.2-rc.2" }
 rgb-psbt-utils = { version = "0.11.2-rc.1", path = "psbt" }
 indexmap = "2.14.0"
 chrono = "0.4.45"
@@ -141,10 +141,3 @@ sqlite = [
 
 [package.metadata.docs.rs]
 features = ["all"]
-
-[patch.crates-io]
-rgb-strict-encoding = { git = "https://github.com/rgb-protocol/rgb-strict-encoding", rev = "e12b9944" }
-rgb-strict-types = { git = "https://github.com/rgb-protocol/rgb-strict-types", rev = "8714cdc" }
-rgb-consensus = { git = "https://github.com/rgb-protocol/rgb-consensus", rev = "125aa46d" }
-rgb-ops = { git = "https://github.com/rgb-protocol/rgb-ops", rev = "851c4007" }
-rgb-invoicing = { git = "https://github.com/rgb-protocol/rgb-ops", rev = "851c4007" }
